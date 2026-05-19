@@ -40,6 +40,12 @@ export async function Header() {
               Pronósticos
             </Link>
             <Link
+              href="/chisme"
+              className="text-sm font-medium text-white/90 hover:text-white hover:underline"
+            >
+              Chisme
+            </Link>
+            <Link
               href="/ranking"
               className="text-sm font-medium text-white/90 hover:text-white hover:underline"
             >
