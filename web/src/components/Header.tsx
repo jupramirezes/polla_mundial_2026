@@ -5,6 +5,7 @@ import { LogoutButton } from './LogoutButton';
 export async function Header() {
   let userEmail: string | null = null;
   let displayName: string | null = null;
+  let isAdmin = false;
   try {
     const supabase = await getSupabaseServerClient();
     const { data } = await supabase.auth.getUser();
@@ -12,10 +13,11 @@ export async function Header() {
       userEmail = data.user.email ?? null;
       const { data: profile } = await supabase
         .from('profiles')
-        .select('display_name')
+        .select('display_name, is_admin')
         .eq('id', data.user.id)
         .maybeSingle();
       displayName = profile?.display_name ?? null;
+      isAdmin = profile?.is_admin === true;
     }
   } catch {
     // env / db not configured yet
@@ -37,6 +39,11 @@ export async function Header() {
             <Link href="/ranking" className="text-sm font-medium hover:underline">
               Ranking
             </Link>
+            {isAdmin && (
+              <Link href="/admin" className="text-sm font-medium text-orange-700 hover:underline">
+                Admin
+              </Link>
+            )}
             <div className="hidden sm:flex flex-col items-end text-xs">
               <span className="font-medium">{displayName ?? userEmail}</span>
               {displayName && <span className="text-slate-500">{userEmail}</span>}
