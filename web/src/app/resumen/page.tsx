@@ -71,9 +71,9 @@ export default async function ChismePage({ searchParams }: PageProps) {
       <div className="mx-auto max-w-3xl">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold">📰 Chisme</h1>
+            <h1 className="text-2xl font-bold">📋 Resumen de predicciones</h1>
             <p className="mt-1 text-sm text-slate-600">
-              Las predicciones de todos los participantes, partido por partido. Solo se ven las predicciones <strong>ya guardadas</strong>.
+              Lo que predijo cada participante por partido. Solo se ven las predicciones <strong>ya guardadas</strong>.
             </p>
           </div>
           <Link href="/pronosticos" className="text-sm text-emerald-700 hover:underline">
@@ -86,7 +86,7 @@ export default async function ChismePage({ searchParams }: PageProps) {
           {STAGE_ORDER.map((s) => (
             <Link
               key={s}
-              href={`/chisme?etapa=${s}${s === 'group' ? '&grupo=' + grupo : ''}`}
+              href={`/resumen?etapa=${s}${s === 'group' ? '&grupo=' + grupo : ''}`}
               className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
                 stage === s
                   ? 'border-emerald-700 text-emerald-900'
@@ -104,7 +104,7 @@ export default async function ChismePage({ searchParams }: PageProps) {
             {'ABCDEFGHIJKL'.split('').map((letter) => (
               <Link
                 key={letter}
-                href={`/chisme?etapa=group&grupo=${letter}`}
+                href={`/resumen?etapa=group&grupo=${letter}`}
                 className={`rounded px-2 py-1 text-xs font-mono font-bold transition ${
                   grupo === letter
                     ? 'bg-emerald-700 text-white'
