@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import Link from 'next/link';
 import { setUserAdmin } from './actions';
 
 interface User {
@@ -42,6 +43,7 @@ export function UsersList({ users, currentUserId }: { users: User[]; currentUser
               <th className="px-3 py-2">Nombre</th>
               <th className="px-3 py-2 hidden sm:table-cell">Email</th>
               <th className="px-3 py-2 text-center">Admin</th>
+              <th className="px-3 py-2 text-center">Predicciones</th>
             </tr>
           </thead>
           <tbody>
@@ -68,6 +70,14 @@ export function UsersList({ users, currentUserId }: { users: User[]; currentUser
                     >
                       {u.is_admin ? '✓ admin' : 'hacer admin'}
                     </button>
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    <Link
+                      href={`/admin/usuarios/${u.id}`}
+                      className="rounded-md bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-200"
+                    >
+                      Ver →
+                    </Link>
                   </td>
                 </tr>
               );

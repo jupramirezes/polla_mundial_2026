@@ -38,6 +38,13 @@ export default async function ClasificadosPage() {
   }
   const initialScorer = (scorerRow as { player_name?: string } | null)?.player_name ?? '';
 
+  const { data: profileRow } = await supabase
+    .from('profiles')
+    .select('bracket_locked_at')
+    .eq('id', me.id)
+    .maybeSingle();
+  const bracketLockedAt = (profileRow as { bracket_locked_at?: string | null } | null)?.bracket_locked_at ?? null;
+
   const groupLetters = groups.map((g) => g.letter);
   const teamsByGroup = new Map<string, number[]>();
   for (const g of groups) teamsByGroup.set(g.letter, g.teams.map((t) => t.id));
@@ -111,6 +118,8 @@ export default async function ClasificadosPage() {
               top:   initialTop,
               scorer: initialScorer,
             }}
+            bracketLockedAt={bracketLockedAt}
+            isAdmin={me.isAdmin}
           />
         </div>
       </div>

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { toggleQualifier, saveTopPosition, saveTopScorer } from './actions';
+import { toggleQualifier, saveTopPosition, saveTopScorer, lockBracket } from './actions';
 import type { Team } from '@/lib/types';
 
 type Round = 'r16' | 'qf' | 'sf' | 'final';
@@ -45,14 +45,20 @@ interface Props {
     top: Record<number, number>;
     scorer: string;
   };
+  bracketLockedAt: string | null;
+  isAdmin: boolean;
 }
 
 type Banner = { kind: 'success' | 'error'; text: string } | null;
 
 export function BracketForm({
   userId, allTeams, derivedR32, derivedR32Warnings, byGroup, initial,
+  bracketLockedAt, isAdmin,
 }: Props) {
   const router = useRouter();
+  const locked = !!bracketLockedAt && !isAdmin;
+  const [showLockConfirm, setShowLockConfirm] = useState(false);
+  const [locking, setLocking] = useState(false);
 
   const teamById = useMemo(() => {
     const m = new Map<number, Team>();
@@ -95,8 +101,32 @@ export function BracketForm({
   }
 
   const topUnlocked = picks.sf.size === 4;   // top 4 se basa en semifinalistas
+  const bracketComplete =
+    r32Complete &&
+    picks.r16.size === 16 &&
+    picks.qf.size === 8 &&
+    picks.sf.size === 4 &&
+    picks.final.size === 2 &&
+    Object.values(topPicks).filter(Boolean).length === 4 &&
+    scorer.trim() !== '';
+
+  async function handleConfirmLock() {
+    setLocking(true);
+    const r = await lockBracket();
+    setLocking(false);
+    setShowLockConfirm(false);
+    if (r.error) {
+      setBanner({ kind: 'error', text: r.error });
+      setTimeout(() => setBanner(null), 5000);
+      return;
+    }
+    setBanner({ kind: 'success', text: '✓ Bracket confirmado y bloqueado. Suerte!' });
+    setTimeout(() => setBanner(null), 4000);
+    router.refresh();
+  }
 
   async function handleToggle(round: Round, teamId: number) {
+    if (locked) return;
     setBusy(teamId);
     const result = await toggleQualifier({ round, teamId });
     setBusy(null);
@@ -116,6 +146,7 @@ export function BracketForm({
   }
 
   async function changeTopPosition(pos: number, teamId: number | null) {
+    if (locked) return;
     setTopPicks((p) => ({ ...p, [pos]: teamId }));
     const r = await saveTopPosition({ position: pos, teamId });
     if (r.error) {
@@ -130,6 +161,7 @@ export function BracketForm({
 
   // Debounce manual para el goleador (sin auto-save: usuario teclea, debe guardar al perder foco)
   async function commitScorer() {
+    if (locked) return;
     const r = await saveTopScorer(scorer);
     if (r.error) {
       setBanner({ kind: 'error', text: r.error });
@@ -158,6 +190,18 @@ export function BracketForm({
 
   return (
     <div>
+      {locked && (
+        <div className="mb-4 rounded-lg border-2 border-emerald-300 bg-emerald-50 p-4">
+          <div className="flex items-center gap-2 font-bold text-emerald-900">
+            🔒 Bracket confirmado
+          </div>
+          <p className="mt-1 text-sm text-emerald-800">
+            Confirmaste tu bracket el {new Date(bracketLockedAt!).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}.
+            No puedes cambiarlo. Si necesitas un ajuste legítimo, contacta al admin.
+          </p>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex flex-wrap gap-1 border-b border-slate-200">
         <TabButton
@@ -223,6 +267,74 @@ export function BracketForm({
           onScorerChange={setScorer}
           onScorerCommit={commitScorer}
         />
+      )}
+
+      {/* Botón Confirmar bracket — visible siempre, habilitado solo si está completo */}
+      {!locked && (
+        <div className="mt-8 rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
+          <h3 className="font-bold text-amber-900">¿Listo para confirmar tu bracket?</h3>
+          <p className="mt-1 text-sm text-amber-900">
+            Una vez confirmes <strong>no podrás cambiar nada</strong> (clasificados ni top 4 ni goleador).
+            Solo el admin puede modificarlo después si hay razón legítima.
+          </p>
+          <div className="mt-3 flex items-center gap-3">
+            <button
+              onClick={() => setShowLockConfirm(true)}
+              disabled={!bracketComplete}
+              className="rounded-lg bg-emerald-700 px-5 py-2.5 font-bold text-white hover:bg-emerald-800 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              {bracketComplete ? '🔒 Confirmar mi bracket' : 'Completa todo primero'}
+            </button>
+            {!bracketComplete && (
+              <span className="text-xs text-amber-800">
+                Te falta: {[
+                  !r32Complete && 'R32',
+                  picks.r16.size < 16 && `Octavos (${picks.r16.size}/16)`,
+                  picks.qf.size < 8 && `Cuartos (${picks.qf.size}/8)`,
+                  picks.sf.size < 4 && `Semis (${picks.sf.size}/4)`,
+                  picks.final.size < 2 && `Final (${picks.final.size}/2)`,
+                  Object.values(topPicks).filter(Boolean).length < 4 && `Top 4`,
+                  scorer.trim() === '' && 'Goleador',
+                ].filter(Boolean).join(', ')}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmación */}
+      {showLockConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-bold">¿Confirmar tu bracket?</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Después de esto <strong>no podrás cambiar nada</strong>: ni clasificados,
+              ni top 4, ni goleador. Los marcadores de partidos siguen guardándose uno por uno.
+            </p>
+            <div className="mt-3 rounded-lg bg-slate-50 p-3 text-sm">
+              <div>✓ R32: 32 equipos (automático)</div>
+              <div>✓ Octavos: 16 equipos</div>
+              <div>✓ Cuartos: 8 · Semis: 4 · Final: 2</div>
+              <div>✓ Top 4 + Goleador</div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setShowLockConfirm(false)}
+                disabled={locking}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-100"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmLock}
+                disabled={locking}
+                className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
+              >
+                {locking ? 'Confirmando…' : 'Sí, confirmar bracket'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
