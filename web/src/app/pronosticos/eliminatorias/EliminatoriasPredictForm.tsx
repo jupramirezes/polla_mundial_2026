@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { saveKnockoutPrediction } from './actions';
 import type { MatchRow, Team } from '@/lib/types';
 
@@ -25,13 +26,16 @@ interface Props {
   matches: MatchRow[];
   initialPreds: Array<[number, InitialKoPred]>;
   isAdmin: boolean;
+  userId: string;
 }
 
 type Banner = { kind: 'success' | 'error'; text: string } | null;
 
 export function EliminatoriasPredictForm({
-  teams, matches, initialPreds, isAdmin,
+  teams, matches, initialPreds, isAdmin, userId,
 }: Props) {
+  const router = useRouter();
+  const storageKey = `polla:ko:${userId}`;
   const teamById = useMemo(() => {
     const m = new Map<number, Team>();
     for (const t of teams) m.set(t.id, t);
@@ -53,8 +57,44 @@ export function EliminatoriasPredictForm({
     for (const [mid, p] of initialPreds) {
       m.set(mid, { home: String(p.home), away: String(p.away), lockedAt: p.lockedAt });
     }
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = window.localStorage.getItem(storageKey);
+        if (raw) {
+          const drafts = JSON.parse(raw) as Record<string, { home: string; away: string }>;
+          for (const [midStr, d] of Object.entries(drafts)) {
+            const mid = Number(midStr);
+            const cur = m.get(mid);
+            if (cur && !cur.lockedAt) {
+              m.set(mid, { ...cur, home: d.home ?? '', away: d.away ?? '' });
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
     return m;
   });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const drafts: Record<string, { home: string; away: string }> = {};
+    for (const [mid, s] of states.entries()) {
+      if (!s.lockedAt && (s.home !== '' || s.away !== '')) {
+        drafts[String(mid)] = { home: s.home, away: s.away };
+      }
+    }
+    try {
+      if (Object.keys(drafts).length > 0) {
+        window.localStorage.setItem(storageKey, JSON.stringify(drafts));
+      } else {
+        window.localStorage.removeItem(storageKey);
+      }
+    } catch {
+      // ignore
+    }
+  }, [states, storageKey]);
 
   const [confirm, setConfirm] = useState<null | {
     matchId: number; home: number; away: number; homeName: string; awayName: string;
@@ -113,6 +153,7 @@ export function EliminatoriasPredictForm({
     });
     setBanner({ kind: 'success', text: `✓ ${confirm.homeName} ${confirm.home} - ${confirm.away} ${confirm.awayName} guardado.` });
     setTimeout(() => setBanner(null), 3000);
+    router.refresh();
   }
 
   const openMatches = matches.filter((m) => m.home_team_id && m.away_team_id);

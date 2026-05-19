@@ -49,6 +49,7 @@ export default async function EliminatoriasPage() {
             matches={(matches ?? []) as MatchRow[]}
             initialPreds={Array.from(myPreds.entries())}
             isAdmin={me.isAdmin}
+            userId={me.id}
           />
         </div>
       </div>

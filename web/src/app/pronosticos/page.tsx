@@ -79,9 +79,14 @@ export default async function PronosticosPage() {
       <div className="mx-auto max-w-3xl">
         <h1 className="text-2xl font-bold">Mis pronósticos</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Total en juego: <strong>1.160 pts</strong>. Una vez guardas un pronóstico,
-          queda bloqueado y solo el admin puede cambiarlo.
+          Total en juego: <strong>1.160 pts</strong>.
         </p>
+
+        <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+          💡 <strong>Tip:</strong> primero llena todo (lo que vayas escribiendo se guarda en tu navegador
+          aunque cambies de pantalla). Cuando estés conforme, le das <strong>Guardar</strong> partido por partido.
+          Una vez guardado queda bloqueado y solo el admin puede cambiarlo.
+        </div>
 
         <ul className="mt-6 grid gap-3">
           {sections.map((s) => (

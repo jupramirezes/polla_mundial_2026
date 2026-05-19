@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Team, MatchRow } from '@/lib/types';
 import { computeGroupStandings } from '@/lib/standings';
 import { saveMatchPrediction } from './actions';
@@ -18,6 +19,7 @@ interface Props {
   initialMatchPreds: Array<[number, InitialPred]>;
   phaseOpen: boolean;
   isAdmin: boolean;
+  userId: string;
 }
 
 type Banner = { kind: 'success' | 'error'; text: string } | null;
@@ -29,24 +31,64 @@ interface MatchState {
 }
 
 export function GroupCard({
-  letter, teams, matches, initialMatchPreds, phaseOpen, isAdmin,
+  letter, teams, matches, initialMatchPreds, phaseOpen, isAdmin, userId,
 }: Props) {
+  const router = useRouter();
+  const storageKey = `polla:grupo:${userId}:${letter}`;
+
   const [expanded, setExpanded] = useState(false);
 
+  // Estado inicial: server values + overlay de drafts localStorage para los no bloqueados
   const [states, setStates] = useState<Map<number, MatchState>>(() => {
     const m = new Map<number, MatchState>();
     for (const match of matches) m.set(match.id, { home: '', away: '', lockedAt: null });
     for (const [mid, p] of initialMatchPreds) {
       m.set(mid, { home: String(p.home), away: String(p.away), lockedAt: p.locked_at });
     }
+    // Overlay de drafts
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = window.localStorage.getItem(storageKey);
+        if (raw) {
+          const drafts = JSON.parse(raw) as Record<string, { home: string; away: string }>;
+          for (const [midStr, d] of Object.entries(drafts)) {
+            const mid = Number(midStr);
+            const cur = m.get(mid);
+            if (cur && !cur.lockedAt) {
+              m.set(mid, { ...cur, home: d.home ?? '', away: d.away ?? '' });
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
     return m;
   });
 
-  // Estado del modal de confirmación
+  // Persistir drafts (no bloqueados) en localStorage cada vez que cambien
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const drafts: Record<string, { home: string; away: string }> = {};
+    for (const [mid, s] of states.entries()) {
+      if (!s.lockedAt && (s.home !== '' || s.away !== '')) {
+        drafts[String(mid)] = { home: s.home, away: s.away };
+      }
+    }
+    try {
+      if (Object.keys(drafts).length > 0) {
+        window.localStorage.setItem(storageKey, JSON.stringify(drafts));
+      } else {
+        window.localStorage.removeItem(storageKey);
+      }
+    } catch {
+      // ignore
+    }
+  }, [states, storageKey]);
+
   const [confirm, setConfirm] = useState<null | {
     matchId: number; home: number; away: number; homeName: string; awayName: string;
   }>(null);
-
   const [saving, setSaving] = useState<number | null>(null);
   const [banner, setBanner] = useState<Banner>(null);
 
@@ -56,7 +98,6 @@ export function GroupCard({
     return m;
   }, [teams]);
 
-  // Conteos
   const filledMatches = useMemo(() => {
     let n = 0;
     for (const s of states.values()) if (s.home !== '' && s.away !== '') n++;
@@ -68,7 +109,6 @@ export function GroupCard({
     return n;
   }, [states]);
 
-  // Standings en vivo
   const liveStandings = useMemo(() => {
     return computeGroupStandings(
       teams.map((t) => t.id),
@@ -87,9 +127,7 @@ export function GroupCard({
   function updateScore(matchId: number, side: 'home' | 'away', raw: string) {
     const state = states.get(matchId);
     if (!state) return;
-    // No tocar si está bloqueado (a menos que admin)
     if (state.lockedAt && !isAdmin) return;
-
     const clean = raw.replace(/[^0-9]/g, '').slice(0, 2);
     setStates((prev) => {
       const next = new Map(prev);
@@ -131,20 +169,21 @@ export function GroupCard({
       return;
     }
 
-    // marca lockedAt local
     setStates((prev) => {
       const next = new Map(prev);
       const cur = next.get(confirm.matchId)!;
       next.set(confirm.matchId, { ...cur, lockedAt: new Date().toISOString() });
       return next;
     });
-    setBanner({ kind: 'success', text: `✓ Marcador ${confirm.homeName} ${confirm.home} - ${confirm.away} ${confirm.awayName} guardado.` });
+    setBanner({ kind: 'success', text: `✓ ${confirm.homeName} ${confirm.home} - ${confirm.away} ${confirm.awayName} guardado.` });
     setTimeout(() => setBanner(null), 3000);
+
+    // Refrescar el server component para que el contador del header se actualice
+    router.refresh();
   }
 
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-      {/* Header / toggle */}
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -156,7 +195,7 @@ export function GroupCard({
             {teams.map((t) => t.name).join(' · ')}
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-3 text-xs text-slate-500">
+        <div className="flex shrink-0 items-center gap-2 text-xs text-slate-500">
           <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800 font-mono">
             🔒 {lockedMatches}/6
           </span>
@@ -171,7 +210,6 @@ export function GroupCard({
 
       {expanded && (
         <div className="border-t border-slate-200 px-4 py-4 space-y-5">
-          {/* Banner success/error */}
           {banner && (
             <div className={`rounded-lg border px-3 py-2 text-sm ${
               banner.kind === 'success'
@@ -182,11 +220,18 @@ export function GroupCard({
             </div>
           )}
 
-          {/* Marcadores con save explícito */}
           <section>
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700 mb-2">
-              Marcadores
-            </h3>
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
+                Marcadores
+              </h3>
+              <span className="text-xs text-slate-500">
+                <span className="inline-block w-3 h-3 rounded-sm bg-amber-100 align-middle mr-1"></span>
+                pendiente
+                <span className="inline-block w-3 h-3 rounded-sm bg-emerald-100 align-middle ml-3 mr-1"></span>
+                guardado
+              </span>
+            </div>
             <div className="space-y-2">
               {matches.map((m) => {
                 const home = teamById.get(m.home_team_id!);
@@ -200,7 +245,7 @@ export function GroupCard({
                   <div
                     key={m.id}
                     className={`flex items-center gap-2 rounded-lg border p-2 ${
-                      locked ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-white'
+                      locked ? 'border-emerald-300 bg-emerald-50/60' : 'border-slate-200 bg-white'
                     }`}
                   >
                     <div className="flex-1 text-right text-sm truncate font-medium">
@@ -216,7 +261,7 @@ export function GroupCard({
                       disabled={!editable}
                       className={`w-12 rounded border px-2 py-1.5 text-center font-mono font-bold focus:outline-none focus:ring-2 ${
                         locked
-                          ? 'border-emerald-300 bg-emerald-100 text-emerald-900 cursor-not-allowed'
+                          ? 'border-emerald-400 bg-emerald-100 text-emerald-900 cursor-not-allowed'
                           : 'border-slate-300 bg-amber-50 focus:ring-amber-400'
                       } disabled:opacity-80`}
                     />
@@ -231,7 +276,7 @@ export function GroupCard({
                       disabled={!editable}
                       className={`w-12 rounded border px-2 py-1.5 text-center font-mono font-bold focus:outline-none focus:ring-2 ${
                         locked
-                          ? 'border-emerald-300 bg-emerald-100 text-emerald-900 cursor-not-allowed'
+                          ? 'border-emerald-400 bg-emerald-100 text-emerald-900 cursor-not-allowed'
                           : 'border-slate-300 bg-amber-50 focus:ring-amber-400'
                       } disabled:opacity-80`}
                     />
@@ -258,7 +303,6 @@ export function GroupCard({
             </div>
           </section>
 
-          {/* Standings derivados (= la predicción del usuario) */}
           <section>
             <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700 mb-2">
               Posiciones del grupo (según tus marcadores)
@@ -273,6 +317,8 @@ export function GroupCard({
                     <th className="px-2 py-1 text-right">G</th>
                     <th className="px-2 py-1 text-right">E</th>
                     <th className="px-2 py-1 text-right">P</th>
+                    <th className="px-2 py-1 text-right">GF</th>
+                    <th className="px-2 py-1 text-right">GC</th>
                     <th className="px-2 py-1 text-right">DG</th>
                     <th className="px-2 py-1 text-right font-bold">Pts</th>
                   </tr>
@@ -292,6 +338,8 @@ export function GroupCard({
                         <td className="px-2 py-1 text-right font-mono">{s.g}</td>
                         <td className="px-2 py-1 text-right font-mono">{s.e}</td>
                         <td className="px-2 py-1 text-right font-mono">{s.p}</td>
+                        <td className="px-2 py-1 text-right font-mono">{s.gf}</td>
+                        <td className="px-2 py-1 text-right font-mono">{s.gc}</td>
                         <td className="px-2 py-1 text-right font-mono">{s.dg > 0 ? '+' + s.dg : s.dg}</td>
                         <td className="px-2 py-1 text-right font-mono font-bold">{s.pts}</td>
                       </tr>
@@ -301,21 +349,18 @@ export function GroupCard({
               </table>
             </div>
             <p className="mt-2 text-xs text-slate-500">
-              El 3° de cada grupo compite por uno de los 8 cupos como mejor 3° (regla FIFA: Pts → DG → GF).
-              Mira la pantalla de <a href="/pronosticos/clasificados" className="underline">Clasificados</a> para ver tu R32.
+              El 3° compite por uno de los 8 cupos como mejor 3° (regla FIFA: Pts → DG → GF).
+              Mira tu R32 en <a href="/pronosticos/clasificados" className="underline">Clasificados</a>.
             </p>
           </section>
         </div>
       )}
 
-      {/* Modal de confirmación */}
       {confirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
           <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
             <h3 className="text-lg font-bold">¿Confirmar marcador?</h3>
-            <p className="mt-2 text-sm text-slate-600">
-              Vas a guardar:
-            </p>
+            <p className="mt-2 text-sm text-slate-600">Vas a guardar:</p>
             <div className="mt-3 rounded-lg bg-slate-50 p-3 text-center">
               <div className="text-xl font-bold">
                 {confirm.homeName} <span className="font-mono text-emerald-700">{confirm.home} - {confirm.away}</span> {confirm.awayName}

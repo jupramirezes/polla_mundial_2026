@@ -98,6 +98,7 @@ export default async function GruposPage() {
                 initialMatchPreds={Array.from(matchPreds.entries())}
                 phaseOpen={phaseOpen}
                 isAdmin={me.isAdmin}
+                userId={me.id}
               />
             );
           })}
