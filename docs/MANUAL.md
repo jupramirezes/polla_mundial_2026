@@ -19,6 +19,8 @@ Web app donde los participantes predicen los resultados del Mundial 2026. Cada a
 
 ### Cómo se definen los enfrentamientos de eliminatorias
 
+**El sistema los genera automáticamente** desde los resultados oficiales de la fase de grupos: identifica top 2 + 8 mejores 3ros (regla FIFA Pts→DG→GF) y aplica las 495 combinaciones del Anexo C oficial. En `/admin/eliminatorias` hay un botón **"🤖 Autogenerar cruces"** que arma R32, R16, cuartos, semis, 3°P y final automáticamente conforme van habiendo resultados.
+
 **Los 16 cruces de R32 están predefinidos por FIFA** en posiciones fijas del bracket:
 
 | Partido | Cruce |
@@ -79,9 +81,10 @@ Apenas termine cada partido:
 
 ### Al cierre de fase de grupos
 
-- FIFA publica los **16 cruces de R32** (qué equipo juega contra cuál).
-- `/admin/eliminatorias` → tab **R32** → asigna los 2 equipos a cada uno de los 16 partidos.
-- Esto **abre el formulario de pronóstico** para los participantes en `/pronosticos/eliminatorias`.
+- `/admin/eliminatorias` → click **"🤖 Autogenerar cruces"**.
+- Esto arma los 16 enfrentamientos de R32 automáticamente desde los resultados oficiales + Anexo C de FIFA.
+- Se **abre el formulario de pronóstico** para los participantes en `/pronosticos/eliminatorias`.
+- (Si prefieres asignar manualmente, también puedes — está la opción. Validación incluida: no deja poner el mismo equipo contra sí mismo.)
 
 ### Durante eliminatorias (28 jun – 19 jul)
 
@@ -89,8 +92,7 @@ Apenas termine cada partido KO:
 - `/admin/resultados` → tab de la etapa → meter marcador.
 
 Al cerrar cada ronda (R32 → octavos → cuartos → semis):
-- FIFA publica los cruces de la siguiente.
-- `/admin/eliminatorias` → asignar los 2 equipos a cada partido de la siguiente ronda.
+- Vas a `/admin/eliminatorias` y haces click en **"🤖 Autogenerar cruces"** otra vez. El botón es inteligente: usa los ganadores de la ronda recién terminada para armar la siguiente.
 
 ### El día de la final (19 jul)
 

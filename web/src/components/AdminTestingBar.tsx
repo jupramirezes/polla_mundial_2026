@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { autofillMyGroupPredictions } from '@/app/pronosticos/grupos/actions';
 import { autofillMyBracket, clearMyBracketPicks } from '@/app/pronosticos/clasificados/actions';
+import { autofillMyKnockoutPredictions } from '@/app/pronosticos/eliminatorias/actions';
 
 /**
  * Herramientas de testing, SOLO visible para admin.
@@ -57,6 +58,16 @@ export function AdminTestingBar() {
             className="rounded bg-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50"
           >
             🎲 Llenar bracket
+          </button>
+          <button
+            onClick={() => {
+              if (!confirm('Voy a llenar TUS pronósticos de marcadores de eliminatorias (R32→Final) con marcadores aleatorios. Requiere que ya estén asignados los cruces en /admin/eliminatorias. ¿Seguro?')) return;
+              action('marcadores KO generados', autofillMyKnockoutPredictions);
+            }}
+            disabled={pending}
+            className="rounded bg-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+          >
+            🎲 Llenar KO
           </button>
           <button
             onClick={() => {

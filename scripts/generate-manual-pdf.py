@@ -11,8 +11,9 @@ from reportlab.platypus import (
 )
 import os
 
-OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                   'docs', 'Manual-Polla-Mundial-2026.pdf')
+import sys
+OUT_NAME = sys.argv[1] if len(sys.argv) > 1 else 'Manual-Polla-Mundial-2026.pdf'
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'docs', OUT_NAME)
 
 # ---------- Paleta ----------
 GREEN_DARK = colors.HexColor('#15803D')
@@ -259,13 +260,16 @@ story.append(numbered(4, 'Se guarda solo. El ranking se recalcula autom&aacute;t
 
 story.append(p('Al terminar la fase de grupos (28 de junio)', h2_style))
 story.append(p(
-    'FIFA publica oficialmente los 16 enfrentamientos de R32. Son cruces predefinidos por el reglamento '
-    '(ej. ganador del grupo C contra subcampe&oacute;n del grupo F).',
+    'El sistema genera los cruces solo: vas a Admin &rarr; 2. Asignar enfrentamientos y clickeas el bot&oacute;n '
+    '<b>Autogenerar cruces</b>. Eso lee los resultados oficiales de fase de grupos, identifica los 8 mejores 3ros '
+    'con regla FIFA, aplica el Anexo C oficial y arma los 16 enfrentamientos de R32 autom&aacute;ticamente.',
     body_style,
 ))
 story.append(numbered(1, '<b>Admin &rarr; 2. Asignar enfrentamientos de eliminatorias.</b>'))
-story.append(numbered(2, 'Pesta&ntilde;a <b>R32</b>. En cada uno de los 16 partidos, asignar los dos equipos.'))
-story.append(numbered(3, 'Esto abre el formulario para los participantes en &quot;Marcadores en eliminatorias&quot;.'))
+story.append(numbered(2, 'Click <b>Autogenerar cruces</b>.'))
+story.append(numbered(3, 'Verifica que los 16 cruces de R32 quedaron asignados correctamente.'))
+story.append(numbered(4, 'Esto abre el formulario para los participantes en &quot;Marcadores en eliminatorias&quot;.'))
+story.append(p('(Si prefieres asignar manualmente puedes &mdash; la opci&oacute;n est&aacute;. Hay validaci&oacute;n: no permite poner el mismo equipo contra s&iacute; mismo.)', body_style))
 
 story.append(p('Durante las eliminatorias (28 jun a 19 jul)', h2_style))
 story.append(p('Por cada partido KO que termine:', body_style))
@@ -273,8 +277,9 @@ story.append(numbered(1, '<b>Admin &rarr; 1. Cargar marcadores</b> &rarr; pesta&
 story.append(numbered(2, 'El ranking se recalcula solo: puntos por ganador acertado, marcador exacto, y los que ten&iacute;an a esos equipos como clasificados a esa ronda ya tienen sus puntos.'))
 
 story.append(p('Apenas termine cada ronda completa:', body_style))
-story.append(numbered(1, '<b>Admin &rarr; 2. Asignar enfrentamientos</b> &rarr; pesta&ntilde;a de la siguiente ronda &rarr; asignar los enfrentamientos que public&oacute; FIFA.'))
-story.append(numbered(2, 'Esto abre el formulario de marcadores para los participantes.'))
+story.append(numbered(1, '<b>Admin &rarr; 2. Asignar enfrentamientos</b> &rarr; click <b>Autogenerar cruces</b> otra vez.'))
+story.append(numbered(2, 'El bot&oacute;n usa los ganadores de la ronda reci&eacute;n terminada para armar la siguiente (R16 desde ganadores R32, cuartos desde octavos, etc.).'))
+story.append(numbered(3, 'Esto abre el formulario de marcadores para los participantes.'))
 
 story.append(p('El d&iacute;a de la final (19 de julio)', h2_style))
 story.append(numbered(1, '<b>Admin &rarr; 4. Top 4 + goleador final.</b>'))

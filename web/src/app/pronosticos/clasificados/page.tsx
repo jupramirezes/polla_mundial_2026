@@ -105,10 +105,9 @@ export default async function ClasificadosPage() {
         </div>
 
         <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-          <strong>Cómo funciona:</strong> Los 16 enfrentamientos de R32 se generan{' '}
-          <strong>automáticamente</strong> con tus marcadores de grupos (regla FIFA + Anexo C
-          oficial). Tú eliges el ganador de cada cruce. Los ganadores avanzan en el bracket.
-          Al final, el campeón es el ganador de la final; el goleador lo escribes a mano.
+          <p>
+            <strong>Cómo se arman los cruces:</strong> Con tus marcadores de fase de grupos, el sistema saca los top 2 de cada grupo + 8 mejores 3ros (Pts → DG → GF), y aplica las <strong>495 combinaciones del Anexo C oficial de FIFA</strong> para asignar quién juega contra quién en R32. De ahí, eliges el ganador de cada cruce y los ganadores avanzan automáticamente.
+          </p>
         </div>
 
         <BracketView

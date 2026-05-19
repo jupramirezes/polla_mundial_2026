@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { setMatchTeams } from '../actions';
+import { useMemo, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
+import { setMatchTeams, autoGenerateKnockoutPairings } from '../actions';
 import type { MatchRow, Team } from '@/lib/types';
 
 const STAGE_LABEL: Record<string, string> = {
@@ -17,6 +18,24 @@ const STAGE_ORDER = ['r32', 'r16', 'qf', 'sf', 'tp', 'final'];
 type Status = 'idle' | 'saving' | 'saved' | 'error';
 
 export function EliminatoriasForm({ teams, matches }: { teams: Team[]; matches: MatchRow[] }) {
+  const router = useRouter();
+  const [autogenPending, startAutogen] = useTransition();
+  const [autogenMsg, setAutogenMsg] = useState<string | null>(null);
+
+  function handleAutogen() {
+    if (!confirm('Voy a autogenerar los cruces de R32 desde los resultados OFICIALES de fase de grupos (requiere los 72 marcadores llenos). Y si hay resultados oficiales de R32, también genera octavos, y así. ¿Seguro?')) return;
+    setAutogenMsg(null);
+    startAutogen(async () => {
+      const r = await autoGenerateKnockoutPairings();
+      if (r.error) {
+        setAutogenMsg('❌ ' + r.error);
+        return;
+      }
+      setAutogenMsg(`✓ R32: ${r.r32} · Oct: ${r.r16} · 4tos: ${r.qf} · Semi: ${r.sf} · 3°P: ${r.tp} · Final: ${r.final}`);
+      router.refresh();
+    });
+  }
+
   const teamById = useMemo(() => {
     const m = new Map<number, Team>();
     for (const t of teams) m.set(t.id, t);
@@ -72,6 +91,32 @@ export function EliminatoriasForm({ teams, matches }: { teams: Team[]; matches: 
 
   return (
     <div className="space-y-6">
+      {/* Toolbar: autogenerar */}
+      <div className="rounded-lg border-2 border-dashed border-blue-300 bg-blue-50 p-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <strong className="text-blue-900 text-sm">🤖 Autogenerar cruces (admin)</strong>
+            <p className="text-xs text-blue-800 mt-0.5">
+              Lee los resultados oficiales de la fase de grupos y arma los 16 cruces de R32 según el
+              Anexo C de FIFA. Si hay resultados de R32, también arma octavos, y así sucesivamente
+              hasta donde lleguen los resultados.
+            </p>
+          </div>
+          <button
+            onClick={handleAutogen}
+            disabled={autogenPending}
+            className="rounded bg-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+          >
+            🤖 Autogenerar cruces
+          </button>
+        </div>
+        {autogenMsg && (
+          <p className={`mt-2 text-xs font-semibold ${autogenMsg.startsWith('❌') ? 'text-red-700' : 'text-emerald-700'}`}>
+            {autogenMsg}
+          </p>
+        )}
+      </div>
+
       {STAGE_ORDER.map((stage) => {
         const stageMatches = matchesByStage.get(stage) ?? [];
         if (stageMatches.length === 0) return null;
@@ -93,7 +138,7 @@ export function EliminatoriasForm({ teams, matches }: { teams: Team[]; matches: 
                       className="min-w-0 flex-1 rounded border border-slate-300 bg-blue-50 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                     >
                       <option value="">— equipo local —</option>
-                      {teams.map((t) => (
+                      {teams.filter((t) => t.id !== cur.away).map((t) => (
                         <option key={t.id} value={t.id}>{t.flag_emoji ? `${t.flag_emoji} ` : ''}{t.name}</option>
                       ))}
                     </select>
@@ -104,7 +149,7 @@ export function EliminatoriasForm({ teams, matches }: { teams: Team[]; matches: 
                       className="min-w-0 flex-1 rounded border border-slate-300 bg-blue-50 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                     >
                       <option value="">— equipo visitante —</option>
-                      {teams.map((t) => (
+                      {teams.filter((t) => t.id !== cur.home).map((t) => (
                         <option key={t.id} value={t.id}>{t.flag_emoji ? `${t.flag_emoji} ` : ''}{t.name}</option>
                       ))}
                     </select>
