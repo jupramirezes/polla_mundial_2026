@@ -1,0 +1,29 @@
+# Dependencies (delegado al .gitignore de web/)
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# OS
+Desktop.ini
+
+# Claude Code
+.claude/
+
+# Env (por seguridad: prohibido subir secretos)
+.env
+.env.*
+!.env.*.example
+
+# Build artifacts
+*.tsbuildinfo
+
+# Office lock files (cuando hay un .xlsx/.docx abierto)
+~$*
+
+# Generated files (regenerable via scripts/)
+# (mantenemos commit del seed y excel para conveniencia)
+
