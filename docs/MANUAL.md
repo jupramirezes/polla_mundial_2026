@@ -21,9 +21,34 @@ Web app donde los 20 participantes predicen los resultados del Mundial 2026. Cad
 
 ### Cómo se definen los enfrentamientos de eliminatorias
 
-FIFA **publica los cruces oficialmente** apenas termina la fase de grupos. El admin solo los copia en la app. La estructura del bracket está predefinida por FIFA: algunos enfrentamientos son fijos (ej. "Ganador del Grupo C vs Subcampeón del Grupo F") y otros involucran terceros (ej. "Ganador del Grupo A vs uno de los 8 mejores 3ros del Grupo C/E/F/H/I"). FIFA define qué tercero específico le toca a cada cruce según los grupos de los que vinieron los 8 que clasificaron.
+**Los 16 cruces de R32 están predefinidos por FIFA** en posiciones fijas del bracket:
 
-Resumen para el admin: **no tienes que adivinar nada**, FIFA lo publica y tú lo copias en `/admin/eliminatorias`.
+| Partido | Cruce |
+|---|---|
+| 73 | 2°A vs 2°B |
+| 74 | 1°E vs 3° de A/B/C/D/F |
+| 75 | 1°F vs 2°C |
+| 76 | 1°C vs 2°F |
+| 77 | 1°I vs 3° de C/D/F/G/H |
+| 78 | 2°E vs 2°I |
+| 79 | 1°A vs 3° de C/E/F/H/I |
+| 80 | 1°L vs 3° de E/H/I/J/K |
+| 81 | 1°D vs 3° de B/E/F/I/J |
+| 82 | 1°G vs 3° de A/E/H/I/J |
+| 83 | 2°K vs 2°L |
+| 84 | 1°H vs 2°J |
+| 85 | 1°B vs 3° de E/F/G/I/J |
+| 86 | 1°J vs 2°H |
+| 87 | 1°K vs 3° de D/E/I/J/L |
+| 88 | 2°D vs 2°G |
+
+**Reglas de FIFA:**
+- Un ganador de grupo nunca enfrenta a otro ganador en R32.
+- Los terceros siempre enfrentan a ganadores, no a 2° ni a otro 3°.
+- Nadie juega contra equipo de su propio grupo hasta cuartos.
+- Los 8 mejores 3ros (de los 12 grupos) se asignan a slots específicos según el Anexo C del reglamento (495 combinaciones posibles, depende de qué grupos producen los 3ros que clasifican).
+
+**Para el admin: NO tienes que adivinar nada.** Apenas termina la fase de grupos, FIFA publica oficialmente los 16 enfrentamientos exactos con equipos concretos. Tú solo los copias en `/admin/eliminatorias`. Lo mismo aplica para octavos, cuartos, semis y final — el bracket completo se va resolviendo solo.
 
 ---
 
