@@ -1,10 +1,12 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { toggleQualifier } from './actions';
+import { useRouter } from 'next/navigation';
+import { toggleQualifier, saveTopPosition, saveTopScorer } from './actions';
 import type { Team } from '@/lib/types';
 
 type Round = 'r16' | 'qf' | 'sf' | 'final';
+type Tab = 'r32' | Round | 'top';
 
 const ROUNDS: Array<{ key: Round; label: string; capacity: number; pts: number }> = [
   { key: 'r16',   label: 'Octavos',     capacity: 16, pts: 3  },
@@ -12,6 +14,13 @@ const ROUNDS: Array<{ key: Round; label: string; capacity: number; pts: number }
   { key: 'sf',    label: 'Semifinales', capacity: 4,  pts: 12 },
   { key: 'final', label: 'Final',       capacity: 2,  pts: 22 },
 ];
+
+const POSITION_LABELS: Record<number, { label: string; pts: number }> = {
+  1: { label: 'Campeón',      pts: 90 },
+  2: { label: 'Subcampeón',   pts: 60 },
+  3: { label: 'Tercer lugar', pts: 40 },
+  4: { label: 'Cuarto lugar', pts: 28 },
+};
 
 interface ByGroupRow {
   groupLetter: string;
@@ -26,16 +35,25 @@ interface ByGroupRow {
 }
 
 interface Props {
+  userId: string;
   allTeams: Team[];
   derivedR32: number[];
   derivedR32Warnings: string[];
-  byGroupDebug: ByGroupRow[];
-  initial: Record<Round, number[]>;
+  byGroup: ByGroupRow[];
+  initial: {
+    r16: number[]; qf: number[]; sf: number[]; final: number[];
+    top: Record<number, number>;
+    scorer: string;
+  };
 }
 
-export function QualifiersCascadeForm({
-  allTeams, derivedR32, derivedR32Warnings, byGroupDebug, initial,
+type Banner = { kind: 'success' | 'error'; text: string } | null;
+
+export function BracketForm({
+  userId, allTeams, derivedR32, derivedR32Warnings, byGroup, initial,
 }: Props) {
+  const router = useRouter();
+
   const teamById = useMemo(() => {
     const m = new Map<number, Team>();
     for (const t of allTeams) m.set(t.id, t);
@@ -48,9 +66,16 @@ export function QualifiersCascadeForm({
     sf:    new Set(initial.sf),
     final: new Set(initial.final),
   }));
-  const [activeTab, setActiveTab] = useState<'r32' | Round>('r32');
+  const [topPicks, setTopPicks] = useState<Record<number, number | null>>({
+    1: initial.top[1] ?? null,
+    2: initial.top[2] ?? null,
+    3: initial.top[3] ?? null,
+    4: initial.top[4] ?? null,
+  });
+  const [scorer, setScorer] = useState(initial.scorer);
+  const [activeTab, setActiveTab] = useState<Tab>('r32');
   const [busy, setBusy] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [banner, setBanner] = useState<Banner>(null);
 
   const r32Set = useMemo(() => new Set(derivedR32), [derivedR32]);
   const r32Complete = derivedR32.length === 32;
@@ -69,13 +94,15 @@ export function QualifiersCascadeForm({
     return picks.sf.size === 4;
   }
 
+  const topUnlocked = picks.sf.size === 4;   // top 4 se basa en semifinalistas
+
   async function handleToggle(round: Round, teamId: number) {
-    setError(null);
     setBusy(teamId);
     const result = await toggleQualifier({ round, teamId });
     setBusy(null);
     if (result.error) {
-      setError(result.error);
+      setBanner({ kind: 'error', text: result.error });
+      setTimeout(() => setBanner(null), 4000);
       return;
     }
     setPicks((prev) => {
@@ -85,6 +112,48 @@ export function QualifiersCascadeForm({
       else next[round].delete(teamId);
       return next;
     });
+    router.refresh();
+  }
+
+  async function changeTopPosition(pos: number, teamId: number | null) {
+    setTopPicks((p) => ({ ...p, [pos]: teamId }));
+    const r = await saveTopPosition({ position: pos, teamId });
+    if (r.error) {
+      setBanner({ kind: 'error', text: r.error });
+      setTimeout(() => setBanner(null), 4000);
+      return;
+    }
+    setBanner({ kind: 'success', text: `${POSITION_LABELS[pos].label} guardado.` });
+    setTimeout(() => setBanner(null), 1500);
+    router.refresh();
+  }
+
+  // Debounce manual para el goleador (sin auto-save: usuario teclea, debe guardar al perder foco)
+  async function commitScorer() {
+    const r = await saveTopScorer(scorer);
+    if (r.error) {
+      setBanner({ kind: 'error', text: r.error });
+      setTimeout(() => setBanner(null), 4000);
+      return;
+    }
+    if (scorer.trim() !== '') {
+      setBanner({ kind: 'success', text: 'Goleador guardado.' });
+      setTimeout(() => setBanner(null), 1500);
+    }
+    router.refresh();
+  }
+
+  // Top 4 source = semifinalistas (4 equipos de SF)
+  const semifinalistas = useMemo(() => Array.from(picks.sf), [picks.sf]);
+  function topTeamsAvailableFor(pos: number): Team[] {
+    const usedInOther = new Set<number>();
+    for (const [p, tid] of Object.entries(topPicks)) {
+      if (Number(p) !== pos && tid != null) usedInOther.add(tid);
+    }
+    return semifinalistas
+      .filter((id) => !usedInOther.has(id))
+      .map((id) => teamById.get(id))
+      .filter(Boolean) as Team[];
   }
 
   return (
@@ -92,12 +161,8 @@ export function QualifiersCascadeForm({
       {/* Tabs */}
       <div className="flex flex-wrap gap-1 border-b border-slate-200">
         <TabButton
-          active={activeTab === 'r32'}
-          onClick={() => setActiveTab('r32')}
-          label="Dieciseisavos (R32)"
-          progress={`${derivedR32.length}/32`}
-          locked={false}
-          auto
+          active={activeTab === 'r32'} onClick={() => setActiveTab('r32')}
+          label="R32" progress={`${derivedR32.length}/32`} locked={false} auto
         />
         {ROUNDS.map((r) => {
           const filled = picks[r.key].size;
@@ -113,25 +178,50 @@ export function QualifiersCascadeForm({
             />
           );
         })}
+        <TabButton
+          active={activeTab === 'top'} onClick={() => topUnlocked && setActiveTab('top')}
+          label="Top 4 + Goleador"
+          progress={`${Object.values(topPicks).filter(Boolean).length}/4`}
+          locked={!topUnlocked}
+        />
       </div>
 
-      {error && (
-        <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-          {error}
+      {banner && (
+        <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
+          banner.kind === 'success'
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+            : 'border-red-200 bg-red-50 text-red-900'
+        }`}>
+          {banner.text}
         </div>
       )}
 
-      {activeTab === 'r32' ? (
-        <R32View byGroup={byGroupDebug} teamById={teamById} warnings={derivedR32Warnings} />
-      ) : (
+      {activeTab === 'r32' && (
+        <R32View byGroup={byGroup} teamById={teamById} warnings={derivedR32Warnings} />
+      )}
+
+      {(['r16', 'qf', 'sf', 'final'] as Round[]).includes(activeTab as Round) && (
         <RoundView
-          round={activeTab}
+          round={activeTab as Round}
           meta={ROUNDS.find((r) => r.key === activeTab)!}
-          source={sourceFor(activeTab)}
-          picks={picks[activeTab]}
+          source={sourceFor(activeTab as Round)}
+          picks={picks[activeTab as Round]}
           teamById={teamById}
           busy={busy}
-          onToggle={(tid) => handleToggle(activeTab, tid)}
+          onToggle={(tid) => handleToggle(activeTab as Round, tid)}
+        />
+      )}
+
+      {activeTab === 'top' && (
+        <TopView
+          semifinalistas={semifinalistas}
+          topPicks={topPicks}
+          scorer={scorer}
+          teamById={teamById}
+          teamsAvailableFor={topTeamsAvailableFor}
+          onChangePosition={changeTopPosition}
+          onScorerChange={setScorer}
+          onScorerCommit={commitScorer}
         />
       )}
     </div>
@@ -174,8 +264,8 @@ function R32View({
   return (
     <div className="mt-4">
       <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-        Esta lista es <strong>100% automática</strong> a partir de tus marcadores en
-        Fase de grupos. Para cambiarla, edita tus pronósticos de grupos.
+        Esta lista es <strong>100% automática</strong> a partir de tus marcadores en Fase de grupos.
+        Para cambiarla, edita tus pronósticos de grupos.
       </div>
 
       {warnings.length > 0 && (
@@ -255,12 +345,12 @@ function RoundView({
           <h2 className="font-semibold">{meta.label}</h2>
           <span className="text-sm">
             <span className="font-mono font-bold text-emerald-700">{picks.size}</span>
-            <span className="text-slate-500"> / {meta.capacity} equipos · </span>
+            <span className="text-slate-500"> / {meta.capacity} · </span>
             <span className="font-mono">{meta.pts} pts c/u</span>
           </span>
         </div>
         <p className="mt-1 text-xs text-slate-500">
-          Elige los {meta.capacity} equipos que crees pasan a esta ronda (de los {source.size} disponibles).
+          Elige los {meta.capacity} equipos que crees pasan, de los {source.size} disponibles.
         </p>
       </div>
 
@@ -295,6 +385,96 @@ function RoundView({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function TopView({
+  semifinalistas, topPicks, scorer, teamById, teamsAvailableFor,
+  onChangePosition, onScorerChange, onScorerCommit,
+}: {
+  semifinalistas: number[];
+  topPicks: Record<number, number | null>;
+  scorer: string;
+  teamById: Map<number, Team>;
+  teamsAvailableFor: (pos: number) => Team[];
+  onChangePosition: (pos: number, teamId: number | null) => void;
+  onScorerChange: (v: string) => void;
+  onScorerCommit: () => void;
+}) {
+  return (
+    <div className="mt-4 space-y-6">
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+        Tus <strong>4 semifinalistas</strong> son: {semifinalistas.map((id) => {
+          const t = teamById.get(id);
+          return t ? `${t.flag_emoji ?? ''} ${t.name}` : '';
+        }).join(', ')}. Asígnales posición final.
+      </div>
+
+      <section>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-700 mb-3">
+          Posiciones finales del mundial (entre tus semifinalistas)
+        </h2>
+        <div className="space-y-2">
+          {[1, 2, 3, 4].map((pos) => {
+            const meta = POSITION_LABELS[pos];
+            return (
+              <label key={pos} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3">
+                <div className="w-36 shrink-0">
+                  <div className="font-semibold">{meta.label}</div>
+                  <div className="text-xs text-slate-500">{meta.pts} pts</div>
+                </div>
+                <select
+                  value={topPicks[pos] ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    onChangePosition(pos, v === '' ? null : Number(v));
+                  }}
+                  className="min-w-0 flex-1 rounded border border-slate-300 bg-blue-50 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                >
+                  <option value="">— elegir —</option>
+                  {teamsAvailableFor(pos).map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.flag_emoji ? `${t.flag_emoji} ` : ''}{t.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
+          })}
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-700 mb-3">
+          Goleador del mundial
+        </h2>
+        <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <label className="flex items-center gap-3">
+            <div className="w-36 shrink-0">
+              <div className="font-semibold">Jugador</div>
+              <div className="text-xs text-slate-500">50 pts</div>
+            </div>
+            <input
+              type="text"
+              value={scorer}
+              onChange={(e) => onScorerChange(e.target.value)}
+              onBlur={onScorerCommit}
+              placeholder="Nombre completo del jugador"
+              className="min-w-0 flex-1 rounded border border-slate-300 bg-amber-50 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+            />
+            <button
+              onClick={onScorerCommit}
+              className="rounded bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-800"
+            >
+              Guardar
+            </button>
+          </label>
+          <p className="mt-2 text-xs text-slate-500">
+            Si varios jugadores empatan como máximos goleadores, todos los participantes que predijeron a cualquiera de ellos ganan los 50 pts.
+          </p>
+        </div>
+      </section>
     </div>
   );
 }

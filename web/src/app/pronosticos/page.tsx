@@ -7,7 +7,6 @@ export default async function PronosticosPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  // Progreso real desde la BD
   const [
     { count: matchesFilled },
     { count: r16Picks },
@@ -29,7 +28,8 @@ export default async function PronosticosPage() {
   ]);
 
   const hasScorer = !!(scorerRow as { player_name?: string } | null)?.player_name;
-  const knockoutPicks = (r16Picks ?? 0) + (qfPicks ?? 0) + (sfPicks ?? 0) + (finalPicks ?? 0);
+  const bracketPicks = (r16Picks ?? 0) + (qfPicks ?? 0) + (sfPicks ?? 0) + (finalPicks ?? 0) + (topPositionsFilled ?? 0) + (hasScorer ? 1 : 0);
+  const bracketTotal = 16 + 8 + 4 + 2 + 4 + 1;  // = 35
 
   const sections = [
     {
@@ -40,37 +40,24 @@ export default async function PronosticosPage() {
       href: '/pronosticos/grupos',
       progress: `${matchesFilled ?? 0} / 72 marcadores`,
       done: (matchesFilled ?? 0) >= 72,
-      open: true,
     },
     {
-      key: 'clasificados',
-      title: '🎯 Clasificados a cada ronda',
-      desc: 'R32 sale automático. Elige cuáles pasan a octavos (16), cuartos (8), semis (4) y final (2).',
-      pts: '252 pts',
+      key: 'bracket',
+      title: '🏆 Bracket completo',
+      desc: 'R32 automático. Eliges octavos, cuartos, semis, final, campeón/sub/3°/4° y goleador.',
+      pts: '520 pts',
       href: '/pronosticos/clasificados',
-      progress: `${knockoutPicks} / 30 picks`,
-      done: knockoutPicks >= 30,
-      open: true,
-    },
-    {
-      key: 'top',
-      title: '🥇 Top 4 final + goleador',
-      desc: 'Campeón, sub, 3°, 4° y el goleador del mundial.',
-      pts: '268 pts',
-      href: '/pronosticos/top',
-      progress: `${topPositionsFilled ?? 0}/4 posiciones · goleador: ${hasScorer ? '✓' : '—'}`,
-      done: (topPositionsFilled ?? 0) === 4 && hasScorer,
-      open: true,
+      progress: `${bracketPicks} / ${bracketTotal} picks`,
+      done: bracketPicks >= bracketTotal,
     },
     {
       key: 'ko',
       title: '🔴 Marcadores en eliminatorias (EN VIVO)',
-      desc: 'Predice los marcadores de cada partido cuando el admin asigne los enfrentamientos. Se irá llenando ronda por ronda.',
+      desc: 'Predice los marcadores de cada partido cuando el admin asigne los enfrentamientos.',
       pts: '160 pts',
       href: '/pronosticos/eliminatorias',
       progress: `${koPredsFilled ?? 0} marcadores predichos`,
       done: false,
-      open: true,
     },
   ];
 

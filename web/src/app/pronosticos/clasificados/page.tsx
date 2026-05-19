@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { getCurrentUser } from '@/lib/auth';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { loadAllTeams, loadMyQualifiers } from '@/lib/data/qualifiers';
 import { loadAllGroups } from '@/lib/data/groups';
@@ -8,21 +9,35 @@ import {
   derivePredictedR32,
   type UserGroupMatchPred,
 } from '@/lib/predicted-r32';
-import { QualifiersCascadeForm } from './QualifiersCascadeForm';
+import { BracketForm } from './BracketForm';
 
 export default async function ClasificadosPage() {
-  const supabase = await getSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
+  const me = await getCurrentUser();
+  if (!me) redirect('/login');
 
-  const [teams, myQualifiers, groups, predMatches] = await Promise.all([
+  const supabase = await getSupabaseServerClient();
+  const [
+    teams,
+    myQualifiers,
+    groups,
+    predMatches,
+    { data: topPositionsRows },
+    { data: scorerRow },
+  ] = await Promise.all([
     loadAllTeams(),
     loadMyQualifiers(),
     loadAllGroups(),
     loadMyMatchPredictions(),
+    supabase.from('predictions_top_positions').select('position, team_id').eq('user_id', me.id),
+    supabase.from('predictions_top_scorer').select('player_name').eq('user_id', me.id).maybeSingle(),
   ]);
 
-  // Construir input para derivePredictedR32
+  const initialTop: Record<number, number> = {};
+  for (const r of (topPositionsRows ?? []) as Array<{ position: number; team_id: number }>) {
+    initialTop[r.position] = r.team_id;
+  }
+  const initialScorer = (scorerRow as { player_name?: string } | null)?.player_name ?? '';
+
   const groupLetters = groups.map((g) => g.letter);
   const teamsByGroup = new Map<string, number[]>();
   for (const g of groups) teamsByGroup.set(g.letter, g.teams.map((t) => t.id));
@@ -53,8 +68,10 @@ export default async function ClasificadosPage() {
       <div className="mx-auto max-w-3xl">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold">Clasificados a cada ronda</h1>
-            <p className="mt-1 text-sm text-slate-600">252 pts en juego</p>
+            <h1 className="text-2xl font-bold">Bracket de eliminatorias</h1>
+            <p className="mt-1 text-sm text-slate-600">
+              Clasificados (252 pts) + Top 4 final + Goleador (268 pts) = <strong>520 pts</strong>
+            </p>
           </div>
           <Link href="/pronosticos" className="text-sm text-emerald-700 hover:underline">
             ← Volver
@@ -62,18 +79,20 @@ export default async function ClasificadosPage() {
         </div>
 
         <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-          <strong>Cómo funciona:</strong> Tu lista de <strong>R32 (dieciseisavos)</strong> se llena <strong>automáticamente</strong> con
+          <strong>Cómo funciona:</strong> Tu lista de <strong>R32</strong> se llena <strong>automáticamente</strong> con
           los top 2 + 8 mejores 3ros (regla FIFA: Pts → DG → GF) que salen
           de tus marcadores en <Link href="/pronosticos/grupos" className="underline font-semibold">Fase de grupos</Link>.
-          De ahí eliges los 16 a octavos, 8 a cuartos, 4 a semis y 2 a la final.
+          De ahí eliges los 16 a octavos, 8 a cuartos, 4 a semis, 2 a la final, después asignas el campeón/sub/3°/4°
+          y el goleador, y al final <strong>guardas todo de una</strong>.
         </div>
 
         <div className="mt-6">
-          <QualifiersCascadeForm
+          <BracketForm
+            userId={me.id}
             allTeams={teams}
             derivedR32={Array.from(derivedR32.teams)}
             derivedR32Warnings={derivedR32.warnings}
-            byGroupDebug={derivedR32.byGroup.map((g) => ({
+            byGroup={derivedR32.byGroup.map((g) => ({
               groupLetter: g.groupLetter,
               complete: g.complete,
               first:  g.standings[0]?.teamId ?? null,
@@ -89,6 +108,8 @@ export default async function ClasificadosPage() {
               qf:    Array.from(myQualifiers.qf),
               sf:    Array.from(myQualifiers.sf),
               final: Array.from(myQualifiers.final),
+              top:   initialTop,
+              scorer: initialScorer,
             }}
           />
         </div>
