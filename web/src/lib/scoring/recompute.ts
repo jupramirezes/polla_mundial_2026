@@ -6,6 +6,7 @@ import { computeUserScore } from './aggregate';
 import type { AllPredictions, OfficialResults } from './aggregate';
 import type { QualifierRound } from './rules';
 import { computeGroupStandings } from '@/lib/standings';
+import { derivePredictedR32, type UserGroupMatchPred, type UserStandingPred } from '@/lib/predicted-r32';
 
 type MatchRow = {
   id: number;
@@ -167,6 +168,48 @@ export async function recomputeAllUserScores(): Promise<{ ok: true; users: numbe
     const p = ensure(r.user_id);
     const round = r.round as QualifierRound;
     if (p.qualifiers[round]) p.qualifiers[round].add(r.team_id);
+  }
+
+  // ---- Derivar R32 de cada usuario desde sus predicciones de grupos ----
+  // R32 ya NO se guarda en predictions_qualifiers (es derivado).
+  // Necesitamos: matches con info de grupo y equipos
+  const groupLetters: string[] = Array.from(teamsByGroup.keys()).sort();
+  const matchInfo = new Map<number, { groupLetter: string; homeTeamId: number; awayTeamId: number }>();
+  for (const m of matchesById.values()) {
+    if (m.stage === 'group' && m.group_letter && m.home_team_id && m.away_team_id) {
+      matchInfo.set(m.id, {
+        groupLetter: m.group_letter,
+        homeTeamId: m.home_team_id,
+        awayTeamId: m.away_team_id,
+      });
+    }
+  }
+
+  for (const uid of byUser.keys()) {
+    const preds = byUser.get(uid)!;
+    // Construir input para derivePredictedR32
+    const matchPredsByGroup = new Map<string, UserGroupMatchPred[]>();
+    for (const [matchId, score] of preds.groupMatches) {
+      const info = matchInfo.get(matchId);
+      if (!info) continue;
+      if (!matchPredsByGroup.has(info.groupLetter)) matchPredsByGroup.set(info.groupLetter, []);
+      matchPredsByGroup.get(info.groupLetter)!.push({
+        matchId,
+        groupLetter: info.groupLetter,
+        homeTeamId: info.homeTeamId,
+        awayTeamId: info.awayTeamId,
+        homeScore: score.homeScore,
+        awayScore: score.awayScore,
+      });
+    }
+    const standingPreds: UserStandingPred[] = [];
+    for (const [letter, rows] of preds.groupStandings) {
+      for (const r of rows) {
+        standingPreds.push({ groupLetter: letter, position: r.position, teamId: r.teamId });
+      }
+    }
+    const derived = derivePredictedR32(groupLetters, teamsByGroup, matchPredsByGroup, standingPreds);
+    preds.qualifiers.r32 = derived.teams;
   }
   for (const r of (predTop ?? []) as Array<{ user_id: string; position: number; team_id: number }>) {
     ensure(r.user_id).topPositions.push({ position: r.position as 1|2|3|4, teamId: r.team_id });

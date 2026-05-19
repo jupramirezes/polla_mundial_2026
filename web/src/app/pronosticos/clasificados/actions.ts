@@ -3,9 +3,11 @@
 import { z } from 'zod';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 
-const RoundEnum = z.enum(['r32', 'r16', 'qf', 'sf', 'final']);
+// R32 NO se guarda manualmente: se deriva de las predicciones de grupos.
+// Solo se gestiona aquí R16, QF, SF, Final.
+const RoundEnum = z.enum(['r16', 'qf', 'sf', 'final']);
 const MAX_PER_ROUND: Record<z.infer<typeof RoundEnum>, number> = {
-  r32: 32, r16: 16, qf: 8, sf: 4, final: 2,
+  r16: 16, qf: 8, sf: 4, final: 2,
 };
 
 const toggleSchema = z.object({
@@ -13,15 +15,14 @@ const toggleSchema = z.object({
   teamId: z.number().int().positive(),
 });
 
-/** Toggle: si el equipo ya está predicho para esta ronda, lo quita; si no, lo agrega.
- *  Devuelve error si excedería el cupo (32/16/8/4/2). */
+/** Toggle de equipo para una ronda (R16+). Valida cupo. */
 export async function toggleQualifier(input: z.infer<typeof toggleSchema>) {
   const parsed = toggleSchema.parse(input);
   const supabase = await getSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: 'no autenticado' };
 
-  // Saber si ya existe
+  // ¿Ya existe?
   const { data: existing } = await supabase
     .from('predictions_qualifiers')
     .select('team_id')
@@ -41,7 +42,7 @@ export async function toggleQualifier(input: z.infer<typeof toggleSchema>) {
     return { ok: true, action: 'removed' as const };
   }
 
-  // Validar cupo: contar cuántos ya hay para esta ronda
+  // Cupo
   const { count } = await supabase
     .from('predictions_qualifiers')
     .select('team_id', { count: 'exact', head: true })
@@ -49,7 +50,9 @@ export async function toggleQualifier(input: z.infer<typeof toggleSchema>) {
     .eq('round', parsed.round);
 
   if ((count ?? 0) >= MAX_PER_ROUND[parsed.round]) {
-    return { error: `Ya tienes ${MAX_PER_ROUND[parsed.round]} equipos elegidos para esta ronda. Quita uno antes de añadir otro.` };
+    return {
+      error: `Ya tienes ${MAX_PER_ROUND[parsed.round]} equipos elegidos para esta ronda. Quita uno antes de añadir otro.`,
+    };
   }
 
   const { error } = await supabase

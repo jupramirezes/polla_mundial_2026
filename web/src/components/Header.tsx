@@ -24,42 +24,56 @@ export async function Header() {
   }
 
   return (
-    <header className="border-b border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+    <header className="border-b border-emerald-800/30 bg-gradient-to-r from-emerald-700 to-emerald-800 text-white shadow-sm">
+      <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3">
         <Link href="/" className="flex items-center gap-2 font-bold">
           <span className="text-2xl">⚽</span>
-          <span className="hidden sm:inline">Polla Mundial 2026</span>
+          <span className="hidden sm:inline text-white">Polla Mundial 2026</span>
         </Link>
 
         {userEmail ? (
           <div className="flex items-center gap-4">
-            <Link href="/pronosticos" className="text-sm font-medium hover:underline">
+            <Link
+              href="/pronosticos"
+              className="text-sm font-medium text-white/90 hover:text-white hover:underline"
+            >
               Pronósticos
             </Link>
-            <Link href="/ranking" className="text-sm font-medium hover:underline">
+            <Link
+              href="/ranking"
+              className="text-sm font-medium text-white/90 hover:text-white hover:underline"
+            >
               Ranking
             </Link>
             {isAdmin && (
-              <Link href="/admin" className="text-sm font-medium text-orange-700 hover:underline">
+              <Link
+                href="/admin"
+                className="rounded-md bg-amber-400 px-2.5 py-1 text-xs font-bold text-amber-950 hover:bg-amber-300"
+              >
                 Admin
               </Link>
             )}
-            <div className="hidden sm:flex flex-col items-end text-xs">
-              <span className="font-medium">{displayName ?? userEmail}</span>
-              {displayName && <span className="text-slate-500">{userEmail}</span>}
+            <div className="hidden sm:flex flex-col items-end text-xs leading-tight">
+              <span className="font-semibold text-white">{displayName ?? userEmail}</span>
+              {displayName && (
+                <span className="text-white/70 text-[10px]">{userEmail}</span>
+              )}
             </div>
             <LogoutButton />
           </div>
         ) : (
           <div className="flex items-center gap-3">
-            <Link href="/login" className="text-sm font-medium hover:underline">
+            <Link
+              href="/login"
+              className="text-sm font-medium text-white/90 hover:text-white hover:underline"
+            >
               Entrar
             </Link>
             <Link
               href="/registro"
-              className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
+              className="rounded-md bg-amber-400 px-3 py-1.5 text-sm font-bold text-amber-950 hover:bg-amber-300"
             >
-              Registro
+              Crear cuenta
             </Link>
           </div>
         )}

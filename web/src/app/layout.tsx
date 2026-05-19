@@ -27,10 +27,14 @@ export default function RootLayout({
     <html
       lang="es"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      style={{ colorScheme: 'light' }}
     >
-      <body className="min-h-full flex flex-col bg-slate-50 text-slate-900">
+      <body className="min-h-full flex flex-col bg-[#F8FAF7] text-slate-900">
         <Header />
-        {children}
+        <div className="flex-1 flex flex-col">{children}</div>
+        <footer className="border-t border-slate-200 bg-white py-3 text-center text-xs text-slate-500">
+          ⚽ Polla Mundial 2026 — Copa Mundial FIFA USA · México · Canadá
+        </footer>
       </body>
     </html>
   );

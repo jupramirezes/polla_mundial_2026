@@ -236,9 +236,7 @@ export function GroupCard({
                     <div className="flex-1 text-left text-sm truncate font-medium">
                       {away?.flag_emoji ?? ''} {away?.name}
                     </div>
-                    <span className="w-5 text-xs">
-                      {status === 'saving' ? '…' : status === 'saved' ? '✓' : status === 'error' ? '✗' : ''}
-                    </span>
+                    <SaveBadge status={status} />
                   </div>
                 );
               })}
@@ -312,9 +310,7 @@ export function GroupCard({
                         </option>
                       ))}
                     </select>
-                    <span className="w-5 text-xs shrink-0">
-                      {status === 'saving' ? '…' : status === 'saved' ? '✓' : status === 'error' ? '✗' : ''}
-                    </span>
+                    <SaveBadge status={status} />
                   </label>
                 );
               })}
@@ -323,5 +319,19 @@ export function GroupCard({
         </div>
       )}
     </div>
+  );
+}
+
+function SaveBadge({ status }: { status: SaveStatus | undefined }) {
+  if (!status || status === 'idle') return <span className="w-16 shrink-0" />;
+  const cls =
+    status === 'saving' ? 'bg-blue-100 text-blue-800' :
+    status === 'saved'  ? 'bg-emerald-100 text-emerald-800' :
+                          'bg-red-100 text-red-800';
+  const label = status === 'saving' ? 'guardando…' : status === 'saved' ? '✓ guardado' : 'error';
+  return (
+    <span className={`shrink-0 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${cls}`}>
+      {label}
+    </span>
   );
 }

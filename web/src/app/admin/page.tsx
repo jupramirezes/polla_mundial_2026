@@ -94,9 +94,9 @@ export default async function AdminHomePage() {
             desc="Para los que prefieran llenar el Excel offline."
           />
           <AdminTile
-            href="/admin/recalcular"
-            title="Forzar recálculo"
-            desc="Recalcula los puntajes manualmente (útil tras cambios en bloque)."
+            href="/admin/usuarios"
+            title="Usuarios y admins"
+            desc="Ver registrados y promover/quitar el rol de admin a un amigo organizador."
           />
         </div>
       </div>
