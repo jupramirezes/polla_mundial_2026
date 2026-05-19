@@ -1,11 +1,11 @@
-// Deriva los 32 equipos que un usuario "predice" para R32, a partir de sus
-// predicciones de fase de grupos:
-//   - Top 2 de cada grupo (basado en sus picks manuales de 1° y 2°)
-//   - 8 mejores 3ros (basado en sus picks de 3° + stats derivadas de sus marcadores)
+// Deriva los 32 equipos que un usuario "predice" para R32 a partir de sus
+// predicciones de marcadores de fase de grupos:
+//   - Top 2 de cada grupo (orden derivado de los marcadores)
+//   - 8 mejores 3ros (Pts → Diferencia de goles → Goles a favor — regla FIFA)
 //
-// Es lo que la UI muestra como "tus 32 a R32" y lo que se usa para el scoring.
+// El usuario NO predice posiciones a mano: todo sale de sus marcadores.
 
-import { computeGroupStandings } from './standings';
+import { computeGroupStandings, type StandingRow } from './standings';
 
 export interface UserGroupMatchPred {
   matchId: number;
@@ -16,26 +16,19 @@ export interface UserGroupMatchPred {
   groupLetter: string;
 }
 
-export interface UserStandingPred {
-  groupLetter: string;
-  position: 1 | 2 | 3 | 4;
-  teamId: number;
-}
-
 export interface DerivedR32 {
-  /** 32 equipos predichos para R32. Vacío si no hay datos suficientes. */
+  /** 32 equipos predichos. < 32 si grupos incompletos. */
   teams: Set<number>;
-  /** Desglose por grupo: top 2 (de standings manual) + bandera de "complete" */
+  /** Desglose por grupo para mostrar en UI */
   byGroup: Array<{
     groupLetter: string;
-    pos1: number | null;
-    pos2: number | null;
-    pos3: number | null;
-    third: { teamId: number | null; pts: number; dg: number; gf: number; passes: boolean };
+    complete: boolean;                  // los 6 partidos del grupo predichos
+    standings: StandingRow[];           // tabla completa del grupo (4 filas)
+    thirdPasses: boolean | null;        // si el 3° clasifica como mejor 3ro (null si grupo incompleto)
   }>;
-  /** Lista de los 8 mejores 3ros (teamIds, ya filtrado) */
+  /** Lista de los 8 mejores 3ros (teamIds) */
   bestThirds: number[];
-  /** Si faltan datos críticos para la derivación */
+  /** Mensajes para mostrar al usuario */
   warnings: string[];
 }
 
@@ -43,95 +36,87 @@ export function derivePredictedR32(
   groupLetters: string[],
   teamsByGroup: Map<string, number[]>,
   matchPredsByGroup: Map<string, UserGroupMatchPred[]>,
-  standingPreds: UserStandingPred[],
 ): DerivedR32 {
   const warnings: string[] = [];
   const teams = new Set<number>();
   const byGroup: DerivedR32['byGroup'] = [];
 
-  // Index standing preds: group → position → teamId
-  const standMap = new Map<string, Map<number, number>>();
-  for (const s of standingPreds) {
-    if (!standMap.has(s.groupLetter)) standMap.set(s.groupLetter, new Map());
-    standMap.get(s.groupLetter)!.set(s.position, s.teamId);
-  }
+  // Calcular standings por grupo
+  const standingsByGroup = new Map<string, StandingRow[]>();
+  let incompleteGroups = 0;
 
-  // Cómputo de standings derivadas (para stats del 3°)
-  const derivedStandingsByGroup = new Map<string, ReturnType<typeof computeGroupStandings>>();
   for (const letter of groupLetters) {
-    const matches = matchPredsByGroup.get(letter) ?? [];
+    const preds = matchPredsByGroup.get(letter) ?? [];
     const teamIds = teamsByGroup.get(letter) ?? [];
-    const ms = matches.map((m) => ({
-      homeTeamId: m.homeTeamId,
-      awayTeamId: m.awayTeamId,
-      homeScore: m.homeScore,
-      awayScore: m.awayScore,
+
+    const completed = preds.length === 6; // 6 partidos = grupo cerrado
+    if (!completed) incompleteGroups++;
+
+    const matches = preds.map((p) => ({
+      homeTeamId: p.homeTeamId,
+      awayTeamId: p.awayTeamId,
+      homeScore: p.homeScore as number | null,
+      awayScore: p.awayScore as number | null,
     }));
-    derivedStandingsByGroup.set(letter, computeGroupStandings(teamIds, ms));
+    const standings = computeGroupStandings(teamIds, matches);
+    standingsByGroup.set(letter, standings);
+
+    if (completed) {
+      // Top 2 entran a R32 garantizado
+      teams.add(standings[0].teamId);
+      teams.add(standings[1].teamId);
+    }
   }
 
-  // Top 2 + 3° por grupo
-  const thirdsCandidates: Array<{
-    groupLetter: string;
-    teamId: number;
-    pts: number;
-    dg: number;
-    gf: number;
-  }> = [];
-
+  // 8 mejores 3ros (regla FIFA: Pts → DG → GF)
+  // Solo consideramos 3ros de grupos COMPLETOS (los demás no tienen stats firmes)
+  type ThirdCand = { groupLetter: string; teamId: number; pts: number; dg: number; gf: number };
+  const thirdsCandidates: ThirdCand[] = [];
   for (const letter of groupLetters) {
-    const g = standMap.get(letter) ?? new Map();
-    const pos1 = g.get(1) ?? null;
-    const pos2 = g.get(2) ?? null;
-    const pos3 = g.get(3) ?? null;
-
-    if (pos1) teams.add(pos1);
-    if (pos2) teams.add(pos2);
-
-    // Stats del 3° (basadas en los marcadores predichos)
-    let thirdStats = { pts: 0, dg: 0, gf: 0 };
-    if (pos3) {
-      const derived = derivedStandingsByGroup.get(letter);
-      const row = derived?.find((r) => r.teamId === pos3);
-      if (row) thirdStats = { pts: row.pts, dg: row.dg, gf: row.gf };
-      thirdsCandidates.push({
-        groupLetter: letter,
-        teamId: pos3,
-        ...thirdStats,
-      });
-    }
-
-    byGroup.push({
+    const standings = standingsByGroup.get(letter);
+    if (!standings || standings.length < 3) continue;
+    const preds = matchPredsByGroup.get(letter) ?? [];
+    if (preds.length !== 6) continue; // grupo incompleto
+    const third = standings[2];  // 3° del grupo
+    thirdsCandidates.push({
       groupLetter: letter,
-      pos1, pos2, pos3,
-      third: { teamId: pos3, ...thirdStats, passes: false /* se marca abajo */ },
+      teamId: third.teamId,
+      pts: third.pts,
+      dg:  third.dg,
+      gf:  third.gf,
     });
   }
 
-  // Rankear los 12 3ros por Pts → DG → GF
   thirdsCandidates.sort((a, b) => {
     if (b.pts !== a.pts) return b.pts - a.pts;
     if (b.dg  !== a.dg)  return b.dg  - a.dg;
     if (b.gf  !== a.gf)  return b.gf  - a.gf;
-    return a.teamId - b.teamId;
+    return a.teamId - b.teamId;          // desempate determinístico para sort estable
   });
 
   const bestThirds = thirdsCandidates.slice(0, 8).map((c) => c.teamId);
   const bestThirdsSet = new Set(bestThirds);
   for (const id of bestThirds) teams.add(id);
 
-  // Marcar passes en byGroup
-  for (const g of byGroup) {
-    if (g.third.teamId != null && bestThirdsSet.has(g.third.teamId)) {
-      g.third.passes = true;
-    }
+  // byGroup para UI
+  for (const letter of groupLetters) {
+    const standings = standingsByGroup.get(letter) ?? [];
+    const preds = matchPredsByGroup.get(letter) ?? [];
+    const completed = preds.length === 6;
+    const third = standings[2];
+    const thirdPasses = completed && third ? bestThirdsSet.has(third.teamId) : null;
+    byGroup.push({
+      groupLetter: letter,
+      complete: completed,
+      standings,
+      thirdPasses,
+    });
   }
 
   // Warnings
-  if (teams.size < 32) {
-    const missing = 32 - teams.size;
+  if (incompleteGroups > 0) {
     warnings.push(
-      `Faltan ${missing} equipos. Completa las posiciones (1°, 2°, 3°) de todos los grupos.`,
+      `Faltan ${incompleteGroups} grupo(s) por completar. Llena los 6 marcadores de cada grupo para que la lista de R32 se complete.`,
     );
   }
 

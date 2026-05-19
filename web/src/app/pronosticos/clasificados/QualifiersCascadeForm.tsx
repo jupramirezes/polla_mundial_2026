@@ -3,22 +3,33 @@
 import { useMemo, useState } from 'react';
 import { toggleQualifier } from './actions';
 import type { Team } from '@/lib/types';
-import type { DerivedR32 } from '@/lib/predicted-r32';
 
 type Round = 'r16' | 'qf' | 'sf' | 'final';
 
-const ROUNDS: Array<{ key: Round; label: string; capacity: number; pts: number; from: Round | 'r32' }> = [
-  { key: 'r16',   label: 'Octavos',    capacity: 16, pts: 3,  from: 'r32' },
-  { key: 'qf',    label: 'Cuartos',    capacity: 8,  pts: 6,  from: 'r16' },
-  { key: 'sf',    label: 'Semifinales',capacity: 4,  pts: 12, from: 'qf'  },
-  { key: 'final', label: 'Final',      capacity: 2,  pts: 22, from: 'sf'  },
+const ROUNDS: Array<{ key: Round; label: string; capacity: number; pts: number }> = [
+  { key: 'r16',   label: 'Octavos',     capacity: 16, pts: 3  },
+  { key: 'qf',    label: 'Cuartos',     capacity: 8,  pts: 6  },
+  { key: 'sf',    label: 'Semifinales', capacity: 4,  pts: 12 },
+  { key: 'final', label: 'Final',       capacity: 2,  pts: 22 },
 ];
+
+interface ByGroupRow {
+  groupLetter: string;
+  complete: boolean;
+  first: number | null;
+  second: number | null;
+  third: number | null;
+  thirdPasses: boolean;
+  thirdPts: number;
+  thirdDg: number;
+  thirdGf: number;
+}
 
 interface Props {
   allTeams: Team[];
   derivedR32: number[];
   derivedR32Warnings: string[];
-  byGroupDebug: DerivedR32['byGroup'];
+  byGroupDebug: ByGroupRow[];
   initial: Record<Round, number[]>;
 }
 
@@ -44,19 +55,18 @@ export function QualifiersCascadeForm({
   const r32Set = useMemo(() => new Set(derivedR32), [derivedR32]);
   const r32Complete = derivedR32.length === 32;
 
-  // De qué set viene cada ronda (los equipos que se pueden elegir)
   function sourceFor(round: Round): Set<number> {
     if (round === 'r16') return r32Set;
     if (round === 'qf')  return picks.r16;
     if (round === 'sf')  return picks.qf;
-    return picks.sf;  // final
+    return picks.sf;
   }
 
   function isRoundUnlocked(round: Round): boolean {
     if (round === 'r16') return r32Complete;
     if (round === 'qf')  return picks.r16.size === 16;
     if (round === 'sf')  return picks.qf.size === 8;
-    return picks.sf.size === 4;  // final
+    return picks.sf.size === 4;
   }
 
   async function handleToggle(round: Round, teamId: number) {
@@ -111,13 +121,8 @@ export function QualifiersCascadeForm({
         </div>
       )}
 
-      {/* Contenido del tab */}
       {activeTab === 'r32' ? (
-        <R32View
-          byGroup={byGroupDebug}
-          teamById={teamById}
-          warnings={derivedR32Warnings}
-        />
+        <R32View byGroup={byGroupDebug} teamById={teamById} warnings={derivedR32Warnings} />
       ) : (
         <RoundView
           round={activeTab}
@@ -165,12 +170,12 @@ function TabButton({
 
 function R32View({
   byGroup, teamById, warnings,
-}: { byGroup: DerivedR32['byGroup']; teamById: Map<number, Team>; warnings: string[] }) {
+}: { byGroup: ByGroupRow[]; teamById: Map<number, Team>; warnings: string[] }) {
   return (
     <div className="mt-4">
       <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-        Esta lista es <strong>automática</strong> a partir de tus picks de
-        Fase de grupos. Si quieres cambiarla, edita tus pronósticos de grupos.
+        Esta lista es <strong>100% automática</strong> a partir de tus marcadores en
+        Fase de grupos. Para cambiarla, edita tus pronósticos de grupos.
       </div>
 
       {warnings.length > 0 && (
@@ -185,29 +190,35 @@ function R32View({
             <th className="px-3 py-2 text-left">Grupo</th>
             <th className="px-3 py-2 text-left">1°</th>
             <th className="px-3 py-2 text-left">2°</th>
-            <th className="px-3 py-2 text-left">3° (mejor 3ro)</th>
+            <th className="px-3 py-2 text-left">3° + stats</th>
           </tr>
         </thead>
         <tbody>
           {byGroup.map((g) => {
-            const t1 = g.pos1 ? teamById.get(g.pos1) : null;
-            const t2 = g.pos2 ? teamById.get(g.pos2) : null;
-            const t3 = g.third.teamId ? teamById.get(g.third.teamId) : null;
+            const t1 = g.first  ? teamById.get(g.first)  : null;
+            const t2 = g.second ? teamById.get(g.second) : null;
+            const t3 = g.third  ? teamById.get(g.third)  : null;
             return (
               <tr key={g.groupLetter} className="border-t border-slate-100">
                 <td className="px-3 py-2 font-mono font-semibold">{g.groupLetter}</td>
                 <td className="px-3 py-2">
-                  {t1 ? <span>{t1.flag_emoji ?? ''} {t1.name}</span> : <span className="text-slate-400 italic">sin pick</span>}
+                  {t1 && g.complete ? <span>{t1.flag_emoji ?? ''} {t1.name}</span> : <span className="text-slate-400 italic">faltan marcadores</span>}
                 </td>
                 <td className="px-3 py-2">
-                  {t2 ? <span>{t2.flag_emoji ?? ''} {t2.name}</span> : <span className="text-slate-400 italic">sin pick</span>}
+                  {t2 && g.complete ? <span>{t2.flag_emoji ?? ''} {t2.name}</span> : <span className="text-slate-400 italic">—</span>}
                 </td>
                 <td className="px-3 py-2">
-                  {t3 ? (
-                    g.third.passes
-                      ? <span className="text-emerald-700 font-semibold">✓ {t3.flag_emoji ?? ''} {t3.name}</span>
-                      : <span className="text-slate-400">{t3.flag_emoji ?? ''} {t3.name} (no pasa)</span>
-                  ) : <span className="text-slate-400 italic">sin pick</span>}
+                  {t3 && g.complete ? (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={g.thirdPasses ? 'font-semibold text-emerald-700' : 'text-slate-500'}>
+                        {g.thirdPasses ? '✓ ' : ''}{t3.flag_emoji ?? ''} {t3.name}
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-400">
+                        ({g.thirdPts} pts · DG {g.thirdDg > 0 ? '+' : ''}{g.thirdDg} · GF {g.thirdGf})
+                      </span>
+                      {!g.thirdPasses && <span className="text-[10px] text-slate-400">no pasa</span>}
+                    </div>
+                  ) : <span className="text-slate-400 italic">—</span>}
                 </td>
               </tr>
             );
@@ -229,7 +240,6 @@ function RoundView({
   busy: number | null;
   onToggle: (teamId: number) => void;
 }) {
-  // Ordenar equipos del source por grupo y nombre
   const teams = Array.from(source).map((id) => teamById.get(id)).filter(Boolean) as Team[];
   const byGroup = new Map<string, Team[]>();
   for (const t of teams) {
@@ -250,7 +260,7 @@ function RoundView({
           </span>
         </div>
         <p className="mt-1 text-xs text-slate-500">
-          Elige los {meta.capacity} equipos que crees pasan a esta ronda (de los disponibles).
+          Elige los {meta.capacity} equipos que crees pasan a esta ronda (de los {source.size} disponibles).
         </p>
       </div>
 

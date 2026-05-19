@@ -60,42 +60,43 @@ export default async function HomePage() {
 
       {/* Reglas resumidas */}
       <section className="mx-auto max-w-3xl px-4 py-10">
-        <h2 className="text-xl font-bold text-center mb-1">Cómo se juega</h2>
-        <p className="text-sm text-center text-slate-600 mb-6">
-          5 cosas para predecir. Pocas reglas, muchos puntos.
-        </p>
+        <h2 className="text-xl font-bold text-center mb-6">Cómo se juega</h2>
 
         <div className="space-y-3">
           <RuleCard
             icon="⚽"
             title="1. Marcadores de fase de grupos"
-            desc="Los 72 partidos. Por cada uno: 2 pts si aciertas el ganador, +3 pts si aciertas el marcador exacto."
-            pts="máx 360 pts"
-          />
-          <RuleCard
-            icon="📊"
-            title="2. Posiciones del grupo"
-            desc="Elige quién queda 1°, 2°, 3° y 4° en cada uno de los 12 grupos. 4/3/2/1 pts por posición acertada."
-            pts="máx 120 pts"
+            desc="Los 72 partidos. Por cada uno: 2 pts si aciertas el ganador, +3 pts si aciertas el marcador exacto. Las posiciones de cada grupo se calculan SOLAS a partir de tus marcadores."
+            pts="máx 480 pts"
           />
           <RuleCard
             icon="🎯"
-            title="3. Clasificados a cada ronda"
-            desc="R32 se llena solo con tus predicciones de grupo. Octavos: eliges 16 de esos 32. Cuartos: 8 de los 16. Y así. Cada acierto suma."
+            title="2. Clasificados a cada ronda"
+            desc="R32 (dieciseisavos) se llena automático: top 2 de cada grupo + 8 mejores 3ros con regla FIFA. De octavos en adelante eliges los que crees que pasan."
             pts="máx 252 pts"
           />
           <RuleCard
             icon="🥇"
-            title="4. Top 4 final + Goleador"
+            title="3. Top 4 final + Goleador"
             desc="Quién queda campeón, subcampeón, 3° y 4°. Y el goleador del mundial."
             pts="máx 268 pts"
           />
           <RuleCard
             icon="🔴"
-            title="5. Marcadores en eliminatorias (EN VIVO)"
-            desc="Cuando arrancan los 16avos, se abren formularios para que prediga el marcador de cada partido (R32, octavos, cuartos, semis, 3er puesto, final). Mismas reglas que grupos: 2+3 pts por partido. Tienes hasta antes del pitazo inicial."
+            title="4. Marcadores en eliminatorias (EN VIVO)"
+            desc="Cuando empiezan los dieciseisavos, se abren formularios para predecir el marcador de cada partido (R32 → final). Mismas reglas: 2+3 pts por partido. Tienes hasta antes del pitazo inicial."
             pts="máx 160 pts"
           />
+        </div>
+
+        <div className="mt-6 rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
+          <h3 className="font-bold text-amber-900 mb-1">⚠️ Regla importante</h3>
+          <p className="text-sm text-amber-900">
+            Una vez le das <strong>Guardar</strong> a un pronóstico, queda bloqueado y
+            <strong> no se puede cambiar</strong>. Esto evita que alguien entre a editar
+            después de saber lo que pasó. Si necesitas un cambio legítimo, contacta al admin
+            por WhatsApp con la razón.
+          </p>
         </div>
 
         <div className="mt-6 rounded-lg border-2 border-emerald-200 bg-emerald-50 p-4 text-center">
@@ -107,19 +108,16 @@ export default async function HomePage() {
       {/* Cómo funciona en vivo */}
       <section className="bg-white border-y border-slate-200">
         <div className="mx-auto max-w-3xl px-4 py-8">
-          <h2 className="text-xl font-bold text-center mb-1">¿Cómo va a ser en eliminatorias?</h2>
-          <p className="text-sm text-center text-slate-600 mb-6">
-            La parte chimba: los marcadores se predicen en vivo, partido por partido.
-          </p>
+          <h2 className="text-xl font-bold text-center mb-6">¿Cómo va a ser en eliminatorias?</h2>
           <ol className="space-y-3 text-sm">
             <Step n={1}>
-              <strong>Termina la fase de grupos.</strong> El admin marca quién pasa a 16avos (top 2 de cada grupo + 8 mejores 3ros).
+              <strong>Termina la fase de grupos.</strong> El admin confirma quién pasa a dieciseisavos (top 2 de cada grupo + 8 mejores 3ros).
             </Step>
             <Step n={2}>
-              Apenas se conocen los <strong>pairings</strong> de la siguiente ronda (e.g. Brasil vs Francia en R32), la web te abre el formulario para que predigas <strong>el marcador de ese partido</strong>.
+              Apenas se conocen los <strong>enfrentamientos</strong> de la siguiente ronda (ej. Brasil vs Francia en R32), la web te abre el formulario para que predigas <strong>el marcador de ese partido</strong>.
             </Step>
             <Step n={3}>
-              Tienes hasta <strong>antes del pitazo inicial</strong> para guardar tu predicción. Después se bloquea.
+              Tienes hasta <strong>antes del pitazo inicial</strong> para guardar. Después se bloquea.
             </Step>
             <Step n={4}>
               Termina el partido → el admin carga el resultado oficial → el ranking se actualiza <strong>en vivo</strong> para todos.

@@ -3,59 +3,77 @@
 import { useMemo, useState } from 'react';
 import type { Team, MatchRow } from '@/lib/types';
 import { computeGroupStandings } from '@/lib/standings';
-import {
-  saveMatchPrediction,
-  deleteMatchPrediction,
-  saveGroupStanding,
-  deleteGroupStanding,
-} from './actions';
+import { saveMatchPrediction } from './actions';
+
+interface InitialPred {
+  home: number;
+  away: number;
+  locked_at: string | null;
+}
 
 interface Props {
   letter: string;
   teams: Team[];
   matches: MatchRow[];
-  initialMatchPreds: Array<[number, { home: number; away: number }]>;
-  initialStandingPreds: Array<[number, number]>;   // position → teamId
-  editable: boolean;
+  initialMatchPreds: Array<[number, InitialPred]>;
+  phaseOpen: boolean;
+  isAdmin: boolean;
 }
 
-type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+type Banner = { kind: 'success' | 'error'; text: string } | null;
+
+interface MatchState {
+  home: string;
+  away: string;
+  lockedAt: string | null;
+}
 
 export function GroupCard({
-  letter, teams, matches, initialMatchPreds, initialStandingPreds, editable,
+  letter, teams, matches, initialMatchPreds, phaseOpen, isAdmin,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const [matchScores, setMatchScores] = useState<Map<number, { home: string; away: string }>>(
-    () => {
-      const m = new Map<number, { home: string; away: string }>();
-      for (const [mid, { home, away }] of initialMatchPreds) {
-        m.set(mid, { home: String(home), away: String(away) });
-      }
-      return m;
-    },
-  );
-  const [standings, setStandings] = useState<Map<number, number>>(
-    () => new Map(initialStandingPreds),
-  );
-  const [matchStatus, setMatchStatus] = useState<Map<number, SaveStatus>>(new Map());
-  const [standingStatus, setStandingStatus] = useState<Map<number, SaveStatus>>(new Map());
 
-  // Conteo de progreso
+  const [states, setStates] = useState<Map<number, MatchState>>(() => {
+    const m = new Map<number, MatchState>();
+    for (const match of matches) m.set(match.id, { home: '', away: '', lockedAt: null });
+    for (const [mid, p] of initialMatchPreds) {
+      m.set(mid, { home: String(p.home), away: String(p.away), lockedAt: p.locked_at });
+    }
+    return m;
+  });
+
+  // Estado del modal de confirmación
+  const [confirm, setConfirm] = useState<null | {
+    matchId: number; home: number; away: number; homeName: string; awayName: string;
+  }>(null);
+
+  const [saving, setSaving] = useState<number | null>(null);
+  const [banner, setBanner] = useState<Banner>(null);
+
+  const teamById = useMemo(() => {
+    const m = new Map<number, Team>();
+    for (const t of teams) m.set(t.id, t);
+    return m;
+  }, [teams]);
+
+  // Conteos
   const filledMatches = useMemo(() => {
     let n = 0;
-    for (const v of matchScores.values()) {
-      if (v.home !== '' && v.away !== '') n++;
-    }
+    for (const s of states.values()) if (s.home !== '' && s.away !== '') n++;
     return n;
-  }, [matchScores]);
-  const filledStandings = standings.size;
+  }, [states]);
+  const lockedMatches = useMemo(() => {
+    let n = 0;
+    for (const s of states.values()) if (s.lockedAt) n++;
+    return n;
+  }, [states]);
 
-  // Standings en vivo a partir de los marcadores actuales
+  // Standings en vivo
   const liveStandings = useMemo(() => {
     return computeGroupStandings(
       teams.map((t) => t.id),
       matches.map((m) => {
-        const s = matchScores.get(m.id);
+        const s = states.get(m.id);
         return {
           homeTeamId: m.home_team_id!,
           awayTeamId: m.away_team_id!,
@@ -64,139 +82,107 @@ export function GroupCard({
         };
       }),
     );
-  }, [teams, matches, matchScores]);
-
-  const teamById = useMemo(() => {
-    const m = new Map<number, Team>();
-    for (const t of teams) m.set(t.id, t);
-    return m;
-  }, [teams]);
+  }, [teams, matches, states]);
 
   function updateScore(matchId: number, side: 'home' | 'away', raw: string) {
-    if (!editable) return;
-    // Aceptar vacío o 0-20
+    const state = states.get(matchId);
+    if (!state) return;
+    // No tocar si está bloqueado (a menos que admin)
+    if (state.lockedAt && !isAdmin) return;
+
     const clean = raw.replace(/[^0-9]/g, '').slice(0, 2);
-    setMatchScores((prev) => {
+    setStates((prev) => {
       const next = new Map(prev);
-      const cur = next.get(matchId) ?? { home: '', away: '' };
+      const cur = next.get(matchId)!;
       next.set(matchId, { ...cur, [side]: clean });
       return next;
     });
-
-    // Persistir con debounce simple
-    debouncedSaveMatch(matchId);
   }
 
-  // Debounce manual (Map de timeouts por matchId)
-  const timeouts = useMemo(() => new Map<number, ReturnType<typeof setTimeout>>(), []);
-  function debouncedSaveMatch(matchId: number) {
-    const existing = timeouts.get(matchId);
-    if (existing) clearTimeout(existing);
-    const t = setTimeout(() => persistMatch(matchId), 500);
-    timeouts.set(matchId, t);
+  function clickSave(matchId: number) {
+    const s = states.get(matchId);
+    if (!s || s.home === '' || s.away === '') return;
+    const m = matches.find((x) => x.id === matchId)!;
+    const home = teamById.get(m.home_team_id!);
+    const away = teamById.get(m.away_team_id!);
+    setConfirm({
+      matchId,
+      home: Number(s.home),
+      away: Number(s.away),
+      homeName: home?.name ?? '?',
+      awayName: away?.name ?? '?',
+    });
   }
 
-  async function persistMatch(matchId: number) {
-    const cur = matchScores.get(matchId);
-    if (!cur) return;
-    setMatchStatus((s) => new Map(s).set(matchId, 'saving'));
+  async function confirmSave() {
+    if (!confirm) return;
+    setSaving(confirm.matchId);
+    const r = await saveMatchPrediction({
+      matchId: confirm.matchId,
+      homeScore: confirm.home,
+      awayScore: confirm.away,
+    });
+    setSaving(null);
+    setConfirm(null);
 
-    let result: { ok?: boolean; error?: string };
-    if (cur.home === '' && cur.away === '') {
-      result = await deleteMatchPrediction(matchId);
-    } else if (cur.home !== '' && cur.away !== '') {
-      result = await saveMatchPrediction({
-        matchId,
-        homeScore: Number(cur.home),
-        awayScore: Number(cur.away),
-      });
-    } else {
-      // Sólo un lado lleno: no guardar todavía
-      setMatchStatus((s) => new Map(s).set(matchId, 'idle'));
+    if (r.error) {
+      setBanner({ kind: 'error', text: r.error });
+      setTimeout(() => setBanner(null), 4000);
       return;
     }
 
-    setMatchStatus((s) =>
-      new Map(s).set(matchId, result.ok ? 'saved' : 'error'),
-    );
-    // Limpiar el "saved" después de 1.5s
-    if (result.ok) {
-      setTimeout(() => {
-        setMatchStatus((s) => {
-          const next = new Map(s);
-          if (next.get(matchId) === 'saved') next.delete(matchId);
-          return next;
-        });
-      }, 1500);
-    }
-  }
-
-  async function setStanding(position: number, teamId: number | null) {
-    if (!editable) return;
-    setStandingStatus((s) => new Map(s).set(position, 'saving'));
-
-    // Optimistic UI: actualizar localmente
-    setStandings((prev) => {
+    // marca lockedAt local
+    setStates((prev) => {
       const next = new Map(prev);
-      if (teamId == null) next.delete(position);
-      else next.set(position, teamId);
+      const cur = next.get(confirm.matchId)!;
+      next.set(confirm.matchId, { ...cur, lockedAt: new Date().toISOString() });
       return next;
     });
-
-    let result: { ok?: boolean; error?: string };
-    if (teamId == null) {
-      result = await deleteGroupStanding(letter, position);
-    } else {
-      result = await saveGroupStanding({ groupLetter: letter, position, teamId });
-    }
-    setStandingStatus((s) => new Map(s).set(position, result.ok ? 'saved' : 'error'));
-    if (result.ok) {
-      setTimeout(() => {
-        setStandingStatus((s) => {
-          const next = new Map(s);
-          if (next.get(position) === 'saved') next.delete(position);
-          return next;
-        });
-      }, 1500);
-    }
-  }
-
-  // Equipos disponibles para una posición (los que no están ya en otra posición)
-  function teamsAvailableFor(position: number): Team[] {
-    const usedInOther = new Set<number>();
-    for (const [p, tid] of standings) {
-      if (p !== position) usedInOther.add(tid);
-    }
-    return teams.filter((t) => !usedInOther.has(t.id));
+    setBanner({ kind: 'success', text: `✓ Marcador ${confirm.homeName} ${confirm.home} - ${confirm.away} ${confirm.awayName} guardado.` });
+    setTimeout(() => setBanner(null), 3000);
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      {/* Header / toggle */}
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left hover:bg-slate-50"
       >
         <div className="flex items-center gap-3 min-w-0">
-          <span className="font-bold text-lg">Grupo {letter}</span>
+          <span className="font-bold text-lg text-emerald-900">Grupo {letter}</span>
           <span className="text-xs text-slate-500 truncate">
             {teams.map((t) => t.name).join(' · ')}
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-3 text-xs text-slate-500">
-          <span>
-            <span className="font-mono font-semibold text-slate-900">{filledMatches}</span>/6
+          <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800 font-mono">
+            🔒 {lockedMatches}/6
           </span>
-          <span>
-            <span className="font-mono font-semibold text-slate-900">{filledStandings}</span>/4
-          </span>
+          {filledMatches > lockedMatches && (
+            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 font-mono">
+              ✎ {filledMatches - lockedMatches}
+            </span>
+          )}
           <span className="text-slate-400">{expanded ? '▲' : '▼'}</span>
         </div>
       </button>
 
       {expanded && (
         <div className="border-t border-slate-200 px-4 py-4 space-y-5">
-          {/* Marcadores */}
+          {/* Banner success/error */}
+          {banner && (
+            <div className={`rounded-lg border px-3 py-2 text-sm ${
+              banner.kind === 'success'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                : 'border-red-200 bg-red-50 text-red-900'
+            }`}>
+              {banner.text}
+            </div>
+          )}
+
+          {/* Marcadores con save explícito */}
           <section>
             <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700 mb-2">
               Marcadores
@@ -205,10 +191,18 @@ export function GroupCard({
               {matches.map((m) => {
                 const home = teamById.get(m.home_team_id!);
                 const away = teamById.get(m.away_team_id!);
-                const cur = matchScores.get(m.id) ?? { home: '', away: '' };
-                const status = matchStatus.get(m.id);
+                const s = states.get(m.id) ?? { home: '', away: '', lockedAt: null };
+                const locked = !!s.lockedAt;
+                const editable = phaseOpen && (!locked || isAdmin);
+                const canSave = phaseOpen && s.home !== '' && s.away !== '' && (!locked || isAdmin);
+                const isSaving = saving === m.id;
                 return (
-                  <div key={m.id} className="flex items-center gap-2">
+                  <div
+                    key={m.id}
+                    className={`flex items-center gap-2 rounded-lg border p-2 ${
+                      locked ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-white'
+                    }`}
+                  >
                     <div className="flex-1 text-right text-sm truncate font-medium">
                       {home?.flag_emoji ?? ''} {home?.name}
                     </div>
@@ -217,10 +211,14 @@ export function GroupCard({
                       inputMode="numeric"
                       pattern="[0-9]*"
                       maxLength={2}
-                      value={cur.home}
+                      value={s.home}
                       onChange={(e) => updateScore(m.id, 'home', e.target.value)}
                       disabled={!editable}
-                      className="w-12 rounded border border-slate-300 bg-amber-50 px-2 py-1.5 text-center font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-50"
+                      className={`w-12 rounded border px-2 py-1.5 text-center font-mono font-bold focus:outline-none focus:ring-2 ${
+                        locked
+                          ? 'border-emerald-300 bg-emerald-100 text-emerald-900 cursor-not-allowed'
+                          : 'border-slate-300 bg-amber-50 focus:ring-amber-400'
+                      } disabled:opacity-80`}
                     />
                     <span className="text-slate-400">-</span>
                     <input
@@ -228,27 +226,44 @@ export function GroupCard({
                       inputMode="numeric"
                       pattern="[0-9]*"
                       maxLength={2}
-                      value={cur.away}
+                      value={s.away}
                       onChange={(e) => updateScore(m.id, 'away', e.target.value)}
                       disabled={!editable}
-                      className="w-12 rounded border border-slate-300 bg-amber-50 px-2 py-1.5 text-center font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-50"
+                      className={`w-12 rounded border px-2 py-1.5 text-center font-mono font-bold focus:outline-none focus:ring-2 ${
+                        locked
+                          ? 'border-emerald-300 bg-emerald-100 text-emerald-900 cursor-not-allowed'
+                          : 'border-slate-300 bg-amber-50 focus:ring-amber-400'
+                      } disabled:opacity-80`}
                     />
                     <div className="flex-1 text-left text-sm truncate font-medium">
                       {away?.flag_emoji ?? ''} {away?.name}
                     </div>
-                    <SaveBadge status={status} />
+                    {locked ? (
+                      <span className="shrink-0 inline-flex items-center gap-1 rounded bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-800">
+                        🔒 GUARDADO
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => clickSave(m.id)}
+                        disabled={!canSave || isSaving}
+                        className="shrink-0 rounded bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-30"
+                      >
+                        {isSaving ? '…' : 'Guardar'}
+                      </button>
+                    )}
                   </div>
                 );
               })}
             </div>
           </section>
 
-          {/* Standings preview en vivo */}
+          {/* Standings derivados (= la predicción del usuario) */}
           <section>
             <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700 mb-2">
-              Cómo va el grupo (calculado)
+              Posiciones del grupo (según tus marcadores)
             </h3>
-            <div className="overflow-x-auto">
+            <div className="rounded-lg border border-slate-200 overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-slate-100 text-xs uppercase text-slate-600">
                   <tr>
@@ -265,10 +280,14 @@ export function GroupCard({
                 <tbody>
                   {liveStandings.map((s) => {
                     const team = teamById.get(s.teamId);
+                    const isTop2 = s.position <= 2;
                     return (
-                      <tr key={s.teamId} className="border-t border-slate-100">
-                        <td className="px-2 py-1 font-mono">{s.position}</td>
-                        <td className="px-2 py-1">{team?.flag_emoji ?? ''} {team?.name}</td>
+                      <tr key={s.teamId} className={`border-t border-slate-100 ${isTop2 ? 'bg-emerald-50/40' : ''}`}>
+                        <td className="px-2 py-1 font-mono font-bold">{s.position}</td>
+                        <td className="px-2 py-1">
+                          {team?.flag_emoji ?? ''} {team?.name}
+                          {isTop2 && <span className="ml-1 text-[10px] font-semibold text-emerald-700">✓ a R32</span>}
+                        </td>
                         <td className="px-2 py-1 text-right font-mono">{s.pj}</td>
                         <td className="px-2 py-1 text-right font-mono">{s.g}</td>
                         <td className="px-2 py-1 text-right font-mono">{s.e}</td>
@@ -281,57 +300,47 @@ export function GroupCard({
                 </tbody>
               </table>
             </div>
-          </section>
-
-          {/* Position picks */}
-          <section>
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700 mb-2">
-              Tu predicción de posiciones finales (4/3/2/1 pts)
-            </h3>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {[1, 2, 3, 4].map((pos) => {
-                const status = standingStatus.get(pos);
-                return (
-                  <label key={pos} className="flex items-center gap-2">
-                    <span className="w-12 shrink-0 text-sm font-medium">{pos}°</span>
-                    <select
-                      value={standings.get(pos) ?? ''}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setStanding(pos, v === '' ? null : Number(v));
-                      }}
-                      disabled={!editable}
-                      className="min-w-0 flex-1 rounded border border-slate-300 bg-blue-50 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-50"
-                    >
-                      <option value="">— elegir —</option>
-                      {teamsAvailableFor(pos).map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.flag_emoji ? `${t.flag_emoji} ` : ''}{t.name}
-                        </option>
-                      ))}
-                    </select>
-                    <SaveBadge status={status} />
-                  </label>
-                );
-              })}
-            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              El 3° de cada grupo compite por uno de los 8 cupos como mejor 3° (regla FIFA: Pts → DG → GF).
+              Mira la pantalla de <a href="/pronosticos/clasificados" className="underline">Clasificados</a> para ver tu R32.
+            </p>
           </section>
         </div>
       )}
-    </div>
-  );
-}
 
-function SaveBadge({ status }: { status: SaveStatus | undefined }) {
-  if (!status || status === 'idle') return <span className="w-16 shrink-0" />;
-  const cls =
-    status === 'saving' ? 'bg-blue-100 text-blue-800' :
-    status === 'saved'  ? 'bg-emerald-100 text-emerald-800' :
-                          'bg-red-100 text-red-800';
-  const label = status === 'saving' ? 'guardando…' : status === 'saved' ? '✓ guardado' : 'error';
-  return (
-    <span className={`shrink-0 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${cls}`}>
-      {label}
-    </span>
+      {/* Modal de confirmación */}
+      {confirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-bold">¿Confirmar marcador?</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Vas a guardar:
+            </p>
+            <div className="mt-3 rounded-lg bg-slate-50 p-3 text-center">
+              <div className="text-xl font-bold">
+                {confirm.homeName} <span className="font-mono text-emerald-700">{confirm.home} - {confirm.away}</span> {confirm.awayName}
+              </div>
+            </div>
+            <p className="mt-3 text-sm text-amber-800">
+              ⚠️ Una vez guardado <strong>no podrás cambiarlo</strong>. Solo el admin puede modificarlo después.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setConfirm(null)}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-100"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmSave}
+                className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-800"
+              >
+                Sí, guardar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

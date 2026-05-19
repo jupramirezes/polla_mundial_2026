@@ -1,19 +1,17 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { getCurrentUser } from '@/lib/auth';
 import { loadAllGroups, getGroupPhaseLock } from '@/lib/data/groups';
-import { loadMyMatchPredictions, loadMyGroupStandings } from '@/lib/data/predictions';
+import { loadMyMatchPredictions } from '@/lib/data/predictions';
 import { GroupCard } from './GroupCard';
 
 export default async function GruposPage() {
-  const supabase = await getSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
+  const me = await getCurrentUser();
+  if (!me) redirect('/login');
 
-  const [groups, predMatches, predStandings, lockAt] = await Promise.all([
+  const [groups, predMatches, lockAt] = await Promise.all([
     loadAllGroups(),
     loadMyMatchPredictions(),
-    loadMyGroupStandings(),
     getGroupPhaseLock(),
   ]);
 
@@ -21,9 +19,7 @@ export default async function GruposPage() {
   const filledMatches = Array.from(predMatches.keys()).filter((mid) =>
     groups.some((g) => g.matches.some((m) => m.id === mid)),
   ).length;
-
-  const totalStandings = groups.length * 4;
-  const filledStandings = Array.from(predStandings.values()).reduce((n, m) => n + m.size, 0);
+  const lockedMatches = Array.from(predMatches.values()).filter((p) => !!p.locked_at).length;
 
   const phaseOpen = !lockAt || lockAt > new Date();
 
@@ -34,33 +30,40 @@ export default async function GruposPage() {
           <div>
             <h1 className="text-2xl font-bold">Fase de grupos</h1>
             <p className="mt-1 text-sm text-slate-600">
-              72 marcadores + 12 grupos · 480 pts en juego
+              72 marcadores · 480 pts en juego
             </p>
           </div>
-          <Link href="/pronosticos" className="text-sm text-slate-600 hover:underline">
+          <Link href="/pronosticos" className="text-sm text-emerald-700 hover:underline">
             ← Volver
           </Link>
         </div>
 
+        {/* Header con regla del lock */}
+        <div className="mt-4 rounded-lg border-2 border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          ⚠️ Cada partido tiene su propio botón <strong>Guardar</strong>. Una vez guardado,
+          el marcador queda <strong>bloqueado</strong> y solo el admin puede modificarlo
+          (si lo pides por WhatsApp con razón válida).
+        </div>
+
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <ProgressTile
-            label="Marcadores"
-            value={filledMatches}
+            label="Marcadores guardados"
+            value={lockedMatches}
             total={totalMatches}
-            color="bg-amber-500"
+            color="bg-emerald-600"
           />
           <ProgressTile
-            label="Posiciones de grupo"
-            value={filledStandings}
-            total={totalStandings}
-            color="bg-blue-500"
+            label="Por confirmar"
+            value={filledMatches - lockedMatches}
+            total={totalMatches}
+            color="bg-amber-500"
           />
           <div className="rounded-lg border border-slate-200 bg-white p-3 col-span-2 sm:col-span-1">
             <div className="text-xs text-slate-500">Cierre de pronósticos</div>
             {lockAt ? (
-              <div className="mt-1 font-medium">
+              <div className="mt-1 font-medium text-sm">
                 {phaseOpen ? '🟢 Abierto' : '🔒 Cerrado'}
-                <div className="text-xs text-slate-500">
+                <div className="text-xs text-slate-500 font-mono">
                   {lockAt.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}
                 </div>
               </div>
@@ -78,12 +81,13 @@ export default async function GruposPage() {
 
         <div className="mt-6 space-y-3">
           {groups.map((g) => {
-            const matchPreds = new Map<number, { home: number; away: number }>();
+            const matchPreds = new Map<number, { home: number; away: number; locked_at: string | null }>();
             for (const m of g.matches) {
               const p = predMatches.get(m.id);
-              if (p) matchPreds.set(m.id, { home: p.home_score, away: p.away_score });
+              if (p) matchPreds.set(m.id, {
+                home: p.home_score, away: p.away_score, locked_at: p.locked_at,
+              });
             }
-            const standingPreds = predStandings.get(g.letter) ?? new Map<number, number>();
 
             return (
               <GroupCard
@@ -92,8 +96,8 @@ export default async function GruposPage() {
                 teams={g.teams}
                 matches={g.matches}
                 initialMatchPreds={Array.from(matchPreds.entries())}
-                initialStandingPreds={Array.from(standingPreds.entries())}
-                editable={phaseOpen}
+                phaseOpen={phaseOpen}
+                isAdmin={me.isAdmin}
               />
             );
           })}
