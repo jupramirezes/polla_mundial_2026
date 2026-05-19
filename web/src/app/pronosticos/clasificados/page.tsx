@@ -2,14 +2,10 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
-import { loadAllTeams, loadMyQualifiers } from '@/lib/data/qualifiers';
 import { loadAllGroups } from '@/lib/data/groups';
 import { loadMyMatchPredictions } from '@/lib/data/predictions';
-import {
-  derivePredictedR32,
-  type UserGroupMatchPred,
-} from '@/lib/predicted-r32';
-import { BracketForm } from './BracketForm';
+import { deriveUserBracket, type UserGroupMatchPred } from '@/lib/bracket/derive';
+import { BracketView } from './BracketView';
 
 export default async function ClasificadosPage() {
   const me = await getCurrentUser();
@@ -17,34 +13,54 @@ export default async function ClasificadosPage() {
 
   const supabase = await getSupabaseServerClient();
   const [
-    teams,
-    myQualifiers,
     groups,
     predMatches,
-    { data: topPositionsRows },
+    { data: bracketPicksRows },
     { data: scorerRow },
+    { data: profile },
+    { data: teamsData },
+    { data: matchesData },
   ] = await Promise.all([
-    loadAllTeams(),
-    loadMyQualifiers(),
     loadAllGroups(),
     loadMyMatchPredictions(),
-    supabase.from('predictions_top_positions').select('position, team_id').eq('user_id', me.id),
+    supabase.from('predictions_bracket_winners').select('match_id, winner_team_id').eq('user_id', me.id),
     supabase.from('predictions_top_scorer').select('player_name').eq('user_id', me.id).maybeSingle(),
+    supabase.from('profiles').select('bracket_locked_at').eq('id', me.id).maybeSingle(),
+    supabase.from('teams').select('*'),
+    supabase.from('matches').select('id, stage, external_code'),
   ]);
 
-  const initialTop: Record<number, number> = {};
-  for (const r of (topPositionsRows ?? []) as Array<{ position: number; team_id: number }>) {
-    initialTop[r.position] = r.team_id;
+  // Mapeo de match_id → matchNum (73-104) basado en external_code
+  function externalCodeToMatchNum(code: string): number | null {
+    const m = code.match(/^(R32|R16|QF|SF|TP|FINAL)-(\d{2})$/);
+    if (!m) return null;
+    const stage = m[1], idx = parseInt(m[2], 10);
+    if (stage === 'R32') return 72 + idx;
+    if (stage === 'R16') return 88 + idx;
+    if (stage === 'QF')  return 96 + idx;
+    if (stage === 'SF')  return 100 + idx;
+    if (stage === 'TP')  return 103;
+    if (stage === 'FINAL') return 104;
+    return null;
   }
-  const initialScorer = (scorerRow as { player_name?: string } | null)?.player_name ?? '';
+  const matchIdToNum = new Map<number, number>();
+  const matchNumToId = new Map<number, number>();
+  for (const row of (matchesData ?? []) as Array<{ id: number; external_code: string }>) {
+    const num = externalCodeToMatchNum(row.external_code);
+    if (num != null) {
+      matchIdToNum.set(row.id, num);
+      matchNumToId.set(num, row.id);
+    }
+  }
 
-  const { data: profileRow } = await supabase
-    .from('profiles')
-    .select('bracket_locked_at')
-    .eq('id', me.id)
-    .maybeSingle();
-  const bracketLockedAt = (profileRow as { bracket_locked_at?: string | null } | null)?.bracket_locked_at ?? null;
+  // Picks del usuario: matchNum → team_id
+  const userPicks = new Map<number, number>();
+  for (const r of (bracketPicksRows ?? []) as Array<{ match_id: number; winner_team_id: number }>) {
+    const num = matchIdToNum.get(r.match_id);
+    if (num != null) userPicks.set(num, r.winner_team_id);
+  }
 
+  // Construir input para derivar bracket
   const groupLetters = groups.map((g) => g.letter);
   const teamsByGroup = new Map<string, number[]>();
   for (const g of groups) teamsByGroup.set(g.letter, g.teams.map((t) => t.id));
@@ -68,16 +84,19 @@ export default async function ClasificadosPage() {
     matchPredsByGroup.set(g.letter, list);
   }
 
-  const derivedR32 = derivePredictedR32(groupLetters, teamsByGroup, matchPredsByGroup);
+  const bracket = deriveUserBracket(groupLetters, teamsByGroup, matchPredsByGroup, userPicks);
+
+  const initialScorer = (scorerRow as { player_name?: string } | null)?.player_name ?? '';
+  const bracketLockedAt = (profile as { bracket_locked_at?: string | null } | null)?.bracket_locked_at ?? null;
 
   return (
     <main className="flex-1 px-4 py-6">
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-5xl">
         <div className="flex items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold">Bracket de eliminatorias</h1>
             <p className="mt-1 text-sm text-slate-600">
-              Clasificados (252 pts) + Top 4 final + Goleador (268 pts) = <strong>520 pts</strong>
+              Predice el ganador de cada enfrentamiento. Total en juego: <strong>520 pts</strong>.
             </p>
           </div>
           <Link href="/pronosticos" className="text-sm text-emerald-700 hover:underline">
@@ -86,42 +105,20 @@ export default async function ClasificadosPage() {
         </div>
 
         <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-          <strong>Cómo funciona:</strong> Tu lista de <strong>R32</strong> se llena <strong>automáticamente</strong> con
-          los top 2 + 8 mejores 3ros (regla FIFA: Pts → DG → GF) que salen
-          de tus marcadores en <Link href="/pronosticos/grupos" className="underline font-semibold">Fase de grupos</Link>.
-          De ahí eliges los 16 a octavos, 8 a cuartos, 4 a semis, 2 a la final, después asignas el campeón/sub/3°/4°
-          y el goleador, y al final <strong>guardas todo de una</strong>.
+          <strong>Cómo funciona:</strong> Los 16 enfrentamientos de R32 se generan{' '}
+          <strong>automáticamente</strong> con tus marcadores de grupos (regla FIFA + Anexo C
+          oficial). Tú eliges el ganador de cada cruce. Los ganadores avanzan en el bracket.
+          Al final, el campeón es el ganador de la final; el goleador lo escribes a mano.
         </div>
 
-        <div className="mt-6">
-          <BracketForm
-            userId={me.id}
-            allTeams={teams}
-            derivedR32={Array.from(derivedR32.teams)}
-            derivedR32Warnings={derivedR32.warnings}
-            byGroup={derivedR32.byGroup.map((g) => ({
-              groupLetter: g.groupLetter,
-              complete: g.complete,
-              first:  g.standings[0]?.teamId ?? null,
-              second: g.standings[1]?.teamId ?? null,
-              third:  g.standings[2]?.teamId ?? null,
-              thirdPasses: g.thirdPasses === true,
-              thirdPts: g.standings[2]?.pts ?? 0,
-              thirdDg:  g.standings[2]?.dg ?? 0,
-              thirdGf:  g.standings[2]?.gf ?? 0,
-            }))}
-            initial={{
-              r16:   Array.from(myQualifiers.r16),
-              qf:    Array.from(myQualifiers.qf),
-              sf:    Array.from(myQualifiers.sf),
-              final: Array.from(myQualifiers.final),
-              top:   initialTop,
-              scorer: initialScorer,
-            }}
-            bracketLockedAt={bracketLockedAt}
-            isAdmin={me.isAdmin}
-          />
-        </div>
+        <BracketView
+          userId={me.id}
+          bracket={bracket}
+          teams={teamsData ?? []}
+          initialScorer={initialScorer}
+          bracketLockedAt={bracketLockedAt}
+          isAdmin={me.isAdmin}
+        />
       </div>
     </main>
   );

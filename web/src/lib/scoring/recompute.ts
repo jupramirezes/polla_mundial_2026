@@ -7,6 +7,7 @@ import type { AllPredictions, OfficialResults } from './aggregate';
 import type { QualifierRound } from './rules';
 import { computeGroupStandings } from '@/lib/standings';
 import { derivePredictedR32, type UserGroupMatchPred } from '@/lib/predicted-r32';
+import { deriveUserBracket } from '@/lib/bracket/derive';
 
 type MatchRow = {
   id: number;
@@ -139,12 +140,14 @@ export async function recomputeAllUserScores(): Promise<{ ok: true; users: numbe
     { data: predQual },
     { data: predTop },
     { data: predScorer },
+    { data: predBracketWinners },
   ] = await Promise.all([
     supa.from('predictions_matches').select('user_id, match_id, home_score, away_score'),
     supa.from('predictions_knockout_matches').select('user_id, match_id, home_score, away_score'),
     supa.from('predictions_qualifiers').select('user_id, round, team_id'),
     supa.from('predictions_top_positions').select('user_id, position, team_id'),
     supa.from('predictions_top_scorer').select('user_id, player_name'),
+    supa.from('predictions_bracket_winners').select('user_id, match_id, winner_team_id'),
   ]);
 
   // Indexar por user
@@ -236,8 +239,108 @@ export async function recomputeAllUserScores(): Promise<{ ok: true; users: numbe
     const derived = derivePredictedR32(groupLetters, teamsByGroup, matchPredsByGroup);
     preds.qualifiers.r32 = derived.teams;
   }
+
+  // ---- Derivar R16/QF/SF/Final + Top4 desde predictions_bracket_winners ----
+  // Mapeo match_id (BD) → matchNum lógico (73-104)
+  function matchIdToNum(matchId: number): number | null {
+    const m = matchesById.get(matchId);
+    if (!m) return null;
+    // External code: R32-XX, R16-XX, QF-XX, SF-XX, TP-01, FINAL-01
+    const ec = m.stage;
+    return null;  // se calcula via external_code abajo
+  }
+  // Pre-construir mapeo external_code → matchNum
+  const numByMatchId = new Map<number, number>();
+  {
+    const { data: extCodes } = await supa
+      .from('matches').select('id, external_code');
+    for (const row of (extCodes ?? []) as Array<{ id: number; external_code: string }>) {
+      const m = row.external_code.match(/^(R32|R16|QF|SF|TP|FINAL)-(\d{2})$/);
+      if (!m) continue;
+      const stage = m[1], idx = parseInt(m[2], 10);
+      let num: number | null = null;
+      if (stage === 'R32') num = 72 + idx;
+      else if (stage === 'R16') num = 88 + idx;
+      else if (stage === 'QF')  num = 96 + idx;
+      else if (stage === 'SF')  num = 100 + idx;
+      else if (stage === 'TP')  num = 103;
+      else if (stage === 'FINAL') num = 104;
+      if (num != null) numByMatchId.set(row.id, num);
+    }
+  }
+  // Suprimir warning de matchIdToNum no usado
+  void matchIdToNum;
+
+  const bracketPicksByUser = new Map<string, Map<number, number>>();
+  for (const r of (predBracketWinners ?? []) as Array<{ user_id: string; match_id: number; winner_team_id: number }>) {
+    const num = numByMatchId.get(r.match_id);
+    if (num == null) continue;
+    if (!bracketPicksByUser.has(r.user_id)) bracketPicksByUser.set(r.user_id, new Map());
+    bracketPicksByUser.get(r.user_id)!.set(num, r.winner_team_id);
+  }
+
+  // Para cada usuario, derivar qualifiers + topPositions desde sus bracket winners
+  for (const uid of byUser.keys()) {
+    const preds = byUser.get(uid)!;
+    const picks = bracketPicksByUser.get(uid);
+    if (!picks || picks.size === 0) continue;
+
+    // R16 = ganadores de M73-M88
+    // QF = ganadores de M89-M96
+    // SF = ganadores de M97-M100
+    // Final = ganadores de M101-M102
+    for (const [num, teamId] of picks) {
+      if (num >= 73 && num <= 88) preds.qualifiers.r16.add(teamId);
+      else if (num >= 89 && num <= 96) preds.qualifiers.qf.add(teamId);
+      else if (num >= 97 && num <= 100) preds.qualifiers.sf.add(teamId);
+      else if (num === 101 || num === 102) preds.qualifiers.final.add(teamId);
+    }
+
+    // Top 4: usamos el bracket derivado completo para resolver perdedores
+    const matchPredsByGroupForUser = new Map<string, UserGroupMatchPred[]>();
+    for (const [matchId, score] of preds.groupMatches) {
+      const info = matchInfo.get(matchId);
+      if (!info) continue;
+      if (!matchPredsByGroupForUser.has(info.groupLetter)) matchPredsByGroupForUser.set(info.groupLetter, []);
+      matchPredsByGroupForUser.get(info.groupLetter)!.push({
+        matchId, groupLetter: info.groupLetter,
+        homeTeamId: info.homeTeamId, awayTeamId: info.awayTeamId,
+        homeScore: score.homeScore, awayScore: score.awayScore,
+      });
+    }
+    const userBracket = deriveUserBracket(groupLetters, teamsByGroup, matchPredsByGroupForUser, picks);
+    const matchById = new Map(userBracket.cruces.map((c) => [c.matchNum, c]));
+
+    // Champion = ganador M104
+    const champion = picks.get(104);
+    // Sub = el OTRO equipo en M104 (loser)
+    const finalCruce = matchById.get(104);
+    const subA = finalCruce?.teamA.kind === 'resolved' ? finalCruce.teamA.teamId : null;
+    const subB = finalCruce?.teamB.kind === 'resolved' ? finalCruce.teamB.teamId : null;
+    const sub = champion && (subA === champion ? subB : subA);
+
+    // 3° = ganador M103
+    const third = picks.get(103);
+    // 4° = el OTRO equipo en M103
+    const tpCruce = matchById.get(103);
+    const fourthA = tpCruce?.teamA.kind === 'resolved' ? tpCruce.teamA.teamId : null;
+    const fourthB = tpCruce?.teamB.kind === 'resolved' ? tpCruce.teamB.teamId : null;
+    const fourth = third && (fourthA === third ? fourthB : fourthA);
+
+    preds.topPositions = [];
+    if (champion) preds.topPositions.push({ position: 1, teamId: champion });
+    if (sub) preds.topPositions.push({ position: 2, teamId: sub });
+    if (third) preds.topPositions.push({ position: 3, teamId: third });
+    if (fourth) preds.topPositions.push({ position: 4, teamId: fourth });
+  }
+
   for (const r of (predTop ?? []) as Array<{ user_id: string; position: number; team_id: number }>) {
-    ensure(r.user_id).topPositions.push({ position: r.position as 1|2|3|4, teamId: r.team_id });
+    // Fallback al modelo viejo si el usuario no tiene bracket picks
+    const p = ensure(r.user_id);
+    const hasBracket = bracketPicksByUser.has(r.user_id) && (bracketPicksByUser.get(r.user_id)?.size ?? 0) > 0;
+    if (!hasBracket) {
+      p.topPositions.push({ position: r.position as 1|2|3|4, teamId: r.team_id });
+    }
   }
   for (const r of (predScorer ?? []) as Array<{ user_id: string; player_name: string }>) {
     ensure(r.user_id).topScorer = r.player_name;

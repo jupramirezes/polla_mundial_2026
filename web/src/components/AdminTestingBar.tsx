@@ -3,18 +3,18 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { autofillMyGroupPredictions } from '@/app/pronosticos/grupos/actions';
-import { autofillMyBracket, clearMyPredictions } from '@/app/pronosticos/clasificados/actions';
+import { autofillMyBracket, clearMyBracketPicks } from '@/app/pronosticos/clasificados/actions';
 
 /**
- * Barra de herramientas de testing, SOLO visible para admin.
- * 🧪 BORRAR estas funciones (y el componente) antes de mandar a participantes.
+ * Herramientas de testing, SOLO visible para admin.
+ * 🧪 BORRAR estas funciones (y este componente) antes de mandar a participantes.
  */
 export function AdminTestingBar() {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
 
-  function action(label: string, fn: () => Promise<{ ok?: boolean; error?: string; filled?: number }>) {
+  function action(label: string, fn: () => Promise<{ ok?: boolean; error?: string; filled?: number; picks?: number }>) {
     setMsg(null);
     start(async () => {
       const r = await fn();
@@ -22,7 +22,8 @@ export function AdminTestingBar() {
         setMsg('❌ ' + r.error);
         return;
       }
-      setMsg(`✓ ${label}${typeof r.filled === 'number' ? ` (${r.filled})` : ''}`);
+      const n = r.filled ?? r.picks;
+      setMsg(`✓ ${label}${typeof n === 'number' ? ` (${n})` : ''}`);
       router.refresh();
     });
   }
@@ -49,7 +50,7 @@ export function AdminTestingBar() {
           </button>
           <button
             onClick={() => {
-              if (!confirm('Voy a llenar tu bracket aleatorio (R16 + QF + SF + Final + Top4 + Goleador). Requiere que ya tengas los 72 marcadores de grupos. NO bloquea el bracket. ¿Seguro?')) return;
+              if (!confirm('Voy a llenar tu bracket completo con picks aleatorios (32 partidos + goleador). Requiere que ya tengas los 72 marcadores de grupos. NO bloquea el bracket. ¿Seguro?')) return;
               action('bracket completo generado', autofillMyBracket);
             }}
             disabled={pending}
@@ -59,13 +60,13 @@ export function AdminTestingBar() {
           </button>
           <button
             onClick={() => {
-              if (!confirm('Voy a borrar TODOS tus pronósticos (grupos, bracket, top, goleador, KO, lock). ¿Seguro?')) return;
-              action('pronósticos borrados', clearMyPredictions);
+              if (!confirm('Voy a borrar TODOS tus picks de bracket + goleador + lock. ¿Seguro?')) return;
+              action('bracket borrado', clearMyBracketPicks);
             }}
             disabled={pending}
             className="rounded border border-red-300 bg-white px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
           >
-            Borrar mis pronósticos
+            Borrar bracket
           </button>
         </div>
       </div>
