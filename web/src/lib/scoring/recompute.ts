@@ -72,10 +72,22 @@ export async function recomputeAllUserScores(): Promise<{ ok: true; users: numbe
     })));
   }
 
-  // Clasificados oficiales por ronda
+  // Clasificados oficiales por ronda — derivar primero desde los partidos
+  // asignados (cada equipo home/away en un partido R32 es un clasificado a R32),
+  // y luego overlay manual desde official_qualifiers (admin override).
   const officialQual: Record<QualifierRound, Set<number>> = {
     r32: new Set(), r16: new Set(), qf: new Set(), sf: new Set(), final: new Set(),
   };
+  const STAGE_TO_ROUND: Record<string, QualifierRound | undefined> = {
+    r32: 'r32', r16: 'r16', qf: 'qf', sf: 'sf', final: 'final',
+  };
+  for (const m of matchesById.values()) {
+    const round = STAGE_TO_ROUND[m.stage];
+    if (!round) continue;
+    if (m.home_team_id) officialQual[round].add(m.home_team_id);
+    if (m.away_team_id) officialQual[round].add(m.away_team_id);
+  }
+  // Overlay manual (si admin marcó algo extra en /admin/clasificados)
   {
     const { data: rows } = await supa.from('official_qualifiers').select('round, team_id');
     for (const r of (rows ?? []) as Array<{ round: string; team_id: number }>) {

@@ -70,36 +70,36 @@ export default async function AdminHomePage() {
         <div className="mt-6 space-y-6">
           <div>
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-700 mb-2">
-              Durante el mundial (los más usados)
+              Tareas frecuentes durante el mundial
             </h2>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3">
               <AdminTile
                 href="/admin/resultados"
-                title="① Cargar resultado de un partido"
-                desc="Apenas termine cada partido, entra acá y mete el marcador (X — Y). Va por etapa (grupos, R32, octavos…). El ranking se recalcula solo."
+                title="① Cargar marcadores de partidos"
+                desc="LO MÁS FRECUENTE. Apenas termine un partido (de grupos o de eliminatoria), entra acá y mete el resultado oficial. El ranking se recalcula automático."
               />
               <AdminTile
                 href="/admin/eliminatorias"
-                title="② Asignar enfrentamientos KO"
-                desc="Cuando se conozcan los cruces (ej. Brasil vs Francia en R32), asigna los dos equipos a cada partido. Eso abre el formulario de pronóstico para los participantes."
+                title="② Asignar enfrentamientos de eliminatorias"
+                desc="DESPUÉS DE CADA RONDA. Asigna los 2 equipos a cada partido de la siguiente ronda (R32, octavos, etc.). Esto desbloquea el formulario para que los usuarios predigan el marcador. Los enfrentamientos los define FIFA según los grupos."
               />
             </div>
           </div>
 
           <div>
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-700 mb-2">
-              Final del mundial
+              Cierre del mundial
             </h2>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <AdminTile
                 href="/admin/clasificados"
                 title="③ Marcar clasificados oficiales"
-                desc="Al terminar cada ronda, marca quién pasa a la siguiente (32 a R32, 16 a octavos, 8 a cuartos, etc). Se usa para calificar los puntos de 'clasificados'."
+                desc="OPCIONAL — sirve como respaldo manual. El sistema infiere automáticamente quién clasificó a cada ronda a partir de ② (los equipos asignados a R32 son los clasificados a R32, etc.)."
               />
               <AdminTile
                 href="/admin/top"
                 title="④ Top 4 + goleador final"
-                desc="Al terminar la final, asigna campeón/sub/3°/4° y el goleador del mundial. Cierra los puntos finales."
+                desc="EL DÍA DE LA FINAL. Asigna campeón / subcampeón / 3° / 4° y el goleador del mundial. Cierra los puntos finales (218 + 50 pts)."
               />
             </div>
           </div>

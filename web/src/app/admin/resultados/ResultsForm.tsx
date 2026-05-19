@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { saveMatchResult } from '../actions';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
+import { saveMatchResult, autofillGroupStageResults, clearGroupStageResults } from '../actions';
 import type { MatchRow, Team } from '@/lib/types';
 
 interface Props {
@@ -18,12 +19,12 @@ const STAGE_LABEL: Record<string, string> = {
   tp: 'Tercer puesto',
   final: 'Final',
 };
-
 const STAGE_ORDER = ['group', 'r32', 'r16', 'qf', 'sf', 'tp', 'final'];
 
 type Status = 'idle' | 'saving' | 'saved' | 'error';
 
 export function ResultsForm({ teams, matches }: Props) {
+  const router = useRouter();
   const teamById = useMemo(() => {
     const m = new Map<number, Team>();
     for (const t of teams) m.set(t.id, t);
@@ -43,6 +44,11 @@ export function ResultsForm({ teams, matches }: Props) {
   const [statuses, setStatuses] = useState<Map<number, Status>>(new Map());
   const [activeStage, setActiveStage] = useState<string>('group');
 
+  // Ref para que el setTimeout callback siempre lea el scores MÁS NUEVO
+  // (sin esto la closure captura un Map viejo y se guardaba {home:'2', away:''})
+  const scoresRef = useRef(scores);
+  useEffect(() => { scoresRef.current = scores; }, [scores]);
+
   const matchesByStage = useMemo(() => {
     const m = new Map<string, MatchRow[]>();
     for (const match of matches) {
@@ -50,6 +56,17 @@ export function ResultsForm({ teams, matches }: Props) {
       m.get(match.stage)!.push(match);
     }
     return m;
+  }, [matches]);
+
+  // Para fase de grupos: agrupar por letra
+  const groupMatchesByLetter = useMemo(() => {
+    const m = new Map<string, MatchRow[]>();
+    for (const match of matches) {
+      if (match.stage !== 'group' || !match.group_letter) continue;
+      if (!m.has(match.group_letter)) m.set(match.group_letter, []);
+      m.get(match.group_letter)!.push(match);
+    }
+    return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [matches]);
 
   const timeouts = useMemo(() => new Map<number, ReturnType<typeof setTimeout>>(), []);
@@ -68,14 +85,13 @@ export function ResultsForm({ teams, matches }: Props) {
   }
 
   async function persist(matchId: number) {
-    const cur = scores.get(matchId);
+    // ⚠️ Leer del REF, no del state directo (el closure captura uno viejo)
+    const cur = scoresRef.current.get(matchId);
     if (!cur) return;
     const hasBoth = cur.home !== '' && cur.away !== '';
     const hasNeither = cur.home === '' && cur.away === '';
-    if (!hasBoth && !hasNeither) {
-      // espera a que llene ambos
-      return;
-    }
+    if (!hasBoth && !hasNeither) return;
+
     setStatuses((s) => new Map(s).set(matchId, 'saving'));
     const r = await saveMatchResult({
       matchId,
@@ -84,6 +100,7 @@ export function ResultsForm({ teams, matches }: Props) {
     });
     setStatuses((s) => new Map(s).set(matchId, r.ok ? 'saved' : 'error'));
     if (r.ok) {
+      router.refresh();
       setTimeout(() => {
         setStatuses((s) => {
           const next = new Map(s);
@@ -94,7 +111,82 @@ export function ResultsForm({ teams, matches }: Props) {
     }
   }
 
-  const visibleMatches = matchesByStage.get(activeStage) ?? [];
+  // --- Botones admin de autollenar / limpiar fase de grupos (testing) ---
+  const [adminPending, startAdmin] = useTransition();
+  const [adminMsg, setAdminMsg] = useState<string | null>(null);
+
+  function handleAutofill() {
+    if (!confirm('Vas a llenar los 72 partidos de fase de grupos con marcadores ALEATORIOS y sobreescribir los que ya tengas. ¿Seguro? (Solo para pruebas)')) return;
+    setAdminMsg(null);
+    startAdmin(async () => {
+      const r = await autofillGroupStageResults();
+      if (r.error) {
+        setAdminMsg('Error: ' + r.error);
+        return;
+      }
+      setAdminMsg(`✓ ${r.updated} partidos llenados con marcadores aleatorios.`);
+      router.refresh();
+    });
+  }
+
+  function handleClear() {
+    if (!confirm('Vas a BORRAR todos los marcadores oficiales de fase de grupos. ¿Seguro?')) return;
+    setAdminMsg(null);
+    startAdmin(async () => {
+      const r = await clearGroupStageResults();
+      if (r.error) {
+        setAdminMsg('Error: ' + r.error);
+        return;
+      }
+      setAdminMsg('✓ Marcadores de grupos borrados.');
+      router.refresh();
+    });
+  }
+
+  function renderMatch(m: MatchRow) {
+    const home = m.home_team_id ? teamById.get(m.home_team_id) : null;
+    const away = m.away_team_id ? teamById.get(m.away_team_id) : null;
+    const cur = scores.get(m.id) ?? { home: '', away: '' };
+    const status = statuses.get(m.id);
+    const pending = !home || !away;
+    return (
+      <div key={m.id} className="flex items-center gap-2 rounded border border-slate-200 bg-white px-3 py-2">
+        <span className="w-16 shrink-0 text-xs text-slate-500 font-mono">{m.external_code}</span>
+        <div className="flex-1 text-right text-sm font-medium truncate">
+          {home ? <>{home.flag_emoji ?? ''} {home.name}</> : <span className="text-slate-400 italic">por definir</span>}
+        </div>
+        <input
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          maxLength={2}
+          value={cur.home}
+          onChange={(e) => update(m.id, 'home', e.target.value)}
+          disabled={pending}
+          className="w-12 rounded border border-slate-300 bg-amber-50 px-2 py-1.5 text-center font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-30"
+        />
+        <span className="text-slate-400">-</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          maxLength={2}
+          value={cur.away}
+          onChange={(e) => update(m.id, 'away', e.target.value)}
+          disabled={pending}
+          className="w-12 rounded border border-slate-300 bg-amber-50 px-2 py-1.5 text-center font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-30"
+        />
+        <div className="flex-1 text-left text-sm font-medium truncate">
+          {away ? <>{away.flag_emoji ?? ''} {away.name}</> : <span className="text-slate-400 italic">por definir</span>}
+        </div>
+        <span className="shrink-0 w-20 text-right text-[10px] font-semibold">
+          {status === 'saving' && <span className="text-blue-700">guardando…</span>}
+          {status === 'saved'  && <span className="text-emerald-700">✓ ok</span>}
+          {status === 'error'  && <span className="text-red-700">error</span>}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -110,7 +202,7 @@ export function ResultsForm({ teams, matches }: Props) {
               onClick={() => setActiveStage(stage)}
               className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
                 active
-                  ? 'border-slate-900 text-slate-900'
+                  ? 'border-emerald-700 text-emerald-900'
                   : 'border-transparent text-slate-500 hover:text-slate-700'
               }`}
             >
@@ -123,54 +215,67 @@ export function ResultsForm({ teams, matches }: Props) {
         })}
       </div>
 
-      <div className="mt-4 space-y-1">
-        {visibleMatches.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
-            No hay partidos en esta ronda todavía.
+      {/* Toolbar admin para fase de grupos (solo testing) */}
+      {activeStage === 'group' && (
+        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <strong className="text-blue-900 text-sm">🧪 Herramienta de testing (solo admin)</strong>
+              <p className="text-xs text-blue-800 mt-0.5">
+                Llena los 72 marcadores con valores aleatorios para probar el sistema sin ingresar uno por uno.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleAutofill}
+                disabled={adminPending}
+                className="rounded bg-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+              >
+                🎲 Autollenar grupos
+              </button>
+              <button
+                onClick={handleClear}
+                disabled={adminPending}
+                className="rounded border border-red-300 bg-white px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                Borrar todo
+              </button>
+            </div>
           </div>
-        ) : (
-          visibleMatches.map((m) => {
-            const home = m.home_team_id ? teamById.get(m.home_team_id) : null;
-            const away = m.away_team_id ? teamById.get(m.away_team_id) : null;
-            const cur = scores.get(m.id) ?? { home: '', away: '' };
-            const status = statuses.get(m.id);
-            const pending = !home || !away;
-            return (
-              <div key={m.id} className="flex items-center gap-2 rounded border border-slate-200 bg-white px-3 py-2">
-                <span className="w-16 shrink-0 text-xs text-slate-500 font-mono">{m.external_code}</span>
-                <div className="flex-1 text-right text-sm font-medium truncate">
-                  {home ? <>{home.flag_emoji ?? ''} {home.name}</> : <span className="text-slate-400 italic">por definir</span>}
-                </div>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={2}
-                  value={cur.home}
-                  onChange={(e) => update(m.id, 'home', e.target.value)}
-                  disabled={pending}
-                  className="w-12 rounded border border-slate-300 bg-amber-50 px-2 py-1.5 text-center font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-30"
-                />
-                <span className="text-slate-400">-</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={2}
-                  value={cur.away}
-                  onChange={(e) => update(m.id, 'away', e.target.value)}
-                  disabled={pending}
-                  className="w-12 rounded border border-slate-300 bg-amber-50 px-2 py-1.5 text-center font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-30"
-                />
-                <div className="flex-1 text-left text-sm font-medium truncate">
-                  {away ? <>{away.flag_emoji ?? ''} {away.name}</> : <span className="text-slate-400 italic">por definir</span>}
-                </div>
-                <span className="w-5 text-xs">
-                  {status === 'saving' ? '…' : status === 'saved' ? '✓' : status === 'error' ? '✗' : ''}
+          {adminMsg && (
+            <p className={`mt-2 text-xs font-semibold ${adminMsg.startsWith('Error') ? 'text-red-700' : 'text-emerald-700'}`}>
+              {adminMsg}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Contenido por etapa */}
+      <div className="mt-4 space-y-3">
+        {activeStage === 'group' ? (
+          // Agrupar por letra de grupo
+          groupMatchesByLetter.map(([letter, ms]) => (
+            <details key={letter} className="rounded-lg border border-slate-200 bg-white p-3" open>
+              <summary className="cursor-pointer font-bold text-emerald-900">
+                Grupo {letter}
+                <span className="ml-2 text-xs font-normal text-slate-500">
+                  ({ms.filter((m) => m.home_score != null).length}/6 con resultado)
                 </span>
+              </summary>
+              <div className="mt-2 space-y-1">
+                {ms.map((m) => renderMatch(m))}
               </div>
-            );
-          })
+            </details>
+          ))
+        ) : (
+          // Otras etapas: lista plana
+          (matchesByStage.get(activeStage) ?? []).length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
+              No hay partidos en esta ronda todavía.
+            </div>
+          ) : (
+            (matchesByStage.get(activeStage) ?? []).map((m) => renderMatch(m))
+          )
         )}
       </div>
     </div>
