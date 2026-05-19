@@ -215,6 +215,16 @@ export function ResultsForm({ teams, matches }: Props) {
         })}
       </div>
 
+      {/* Aviso para etapas KO */}
+      {activeStage !== 'group' && (
+        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+          <strong>{STAGE_LABEL[activeStage]} — resultados oficiales.</strong>{' '}
+          Solo aparecen habilitados los partidos donde ya asignaste los 2 equipos en{' '}
+          <a href="/admin/eliminatorias" className="underline font-semibold">/admin/eliminatorias</a>.
+          Los demás aparecen como "por definir".
+        </div>
+      )}
+
       {/* Toolbar admin para fase de grupos (solo testing) */}
       {activeStage === 'group' && (
         <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3">
