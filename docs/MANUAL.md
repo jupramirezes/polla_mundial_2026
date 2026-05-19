@@ -1,14 +1,12 @@
 # 📋 Polla Mundial 2026 — Manual de operación
 
 **URL:** https://polla-mundial-2026-lac.vercel.app
-**Repo código:** https://github.com/jupramirezes/polla_mundial_2026
-**Base de datos:** Supabase (proyecto `frklosfaptkptqmiqlqi`)
 
 ---
 
 ## 🎯 Qué es
 
-Web app donde los 20 participantes predicen los resultados del Mundial 2026. Cada acierto suma puntos (total a repartir: **1.160 pts**). El ranking se actualiza en vivo a medida que el admin va cargando los resultados oficiales.
+Web app donde los participantes predicen los resultados del Mundial 2026. Cada acierto suma puntos (total a repartir: **1.160 pts**). El ranking se actualiza en vivo a medida que el admin va cargando los resultados oficiales.
 
 ---
 
@@ -78,7 +76,6 @@ Web app donde los 20 participantes predicen los resultados del Mundial 2026. Cad
 Apenas termine cada partido:
 - `/admin/resultados` → tab **Fase de grupos** → buscar el partido → meter marcador (X – Y)
 - Se guarda solo. Ranking se recalcula automático.
-- Tip: hay un botón **"🎲 Autollenar grupos"** SOLO para testing — NO lo uses en producción.
 
 ### Al cierre de fase de grupos
 
@@ -132,39 +129,3 @@ Al cerrar cada ronda (R32 → octavos → cuartos → semis):
 | `/admin/top` | ④ Campeón/sub/3°/4° + goleador. El día de la final. |
 | `/admin/usuarios` | Lista de los 20. Promover/quitar admin. Click "Ver →" para ver/editar las predicciones de cualquiera. |
 
----
-
-## 🆘 Troubleshooting
-
-| Problema | Solución |
-|---|---|
-| Usuario dice "no puedo cambiar mi marcador" | Es lo esperado (anti-trampa). Si la razón es válida, el admin lo edita por él. |
-| Usuario no puede registrarse / login | Revisar Supabase → Auth → Users. Si tiene "Email confirmation pending", desactivar "Confirm email" en Authentication → Providers. |
-| Ranking no se actualiza tras guardar | Refrescar la página (en raras ocasiones Realtime tarda unos segundos). |
-| "Desbloquear bracket" no aplica | Refrescar `/admin/usuarios/[id]`. Si persiste, SQL: `update profiles set bracket_locked_at = null where id = '...';` |
-| Quiero borrar TODO y empezar de cero | SQL Editor → ejecutar contenido de `sql/reset_test_data.sql`. Borra todos los pronósticos y resultados oficiales, mantiene usuarios y estructura del torneo. |
-
----
-
-## 🧰 SQL útil (Supabase SQL Editor)
-
-```sql
--- Promover admin manualmente
-update profiles set is_admin = true where email = 'amigo@example.com';
-
--- Cambiar fecha de cierre de pronósticos de grupos
-update phase_locks set locks_at = '2026-06-11T16:00:00-05:00' where phase = 'group';
-
--- Desbloquear bracket de un usuario
-update profiles set bracket_locked_at = null where email = 'usuario@example.com';
-
--- Borrar todos los datos de prueba (resetear)
--- Ver: sql/reset_test_data.sql
-```
-
----
-
-## 📞 Contacto
-
-- **Construcción técnica**: Juan Pablo Ramírez (rjuanpablohb@gmail.com)
-- **Operación durante el mundial**: [tu amigo admin]

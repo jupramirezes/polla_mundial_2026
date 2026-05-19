@@ -56,3 +56,47 @@ export async function saveMatchPrediction(input: z.infer<typeof matchSchema>) {
   if (error) return { error: error.message };
   return { ok: true };
 }
+
+// =====================================================================
+// 🧪 TESTING ONLY — borrar antes de mandar a participantes
+// =====================================================================
+
+/** Admin (testing): rellena mis 72 pronósticos de fase de grupos con
+ *  marcadores aleatorios. Sobreescribe los que ya tenía (también los locked). */
+export async function autofillMyGroupPredictions() {
+  const me = await getCurrentUser();
+  if (!me) return { error: 'no autenticado' };
+  if (!me.isAdmin) return { error: 'solo admin (test)' };
+
+  const supa = getSupabaseAdminClient();
+  const { data: matches, error: e1 } = await supa
+    .from('matches')
+    .select('id')
+    .eq('stage', 'group');
+  if (e1) return { error: e1.message };
+
+  function rand(): number {
+    const r = Math.random();
+    if (r < 0.30) return 0;
+    if (r < 0.65) return 1;
+    if (r < 0.85) return 2;
+    if (r < 0.95) return 3;
+    return 4;
+  }
+
+  const rows = (matches ?? []).map((m) => ({
+    user_id: me.id,
+    match_id: (m as { id: number }).id,
+    home_score: rand(),
+    away_score: rand(),
+    locked_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }));
+
+  // Borrar y reinsertar para forzar sobreescritura de locked
+  await supa.from('predictions_matches').delete().eq('user_id', me.id);
+  const { error } = await supa.from('predictions_matches').insert(rows);
+  if (error) return { error: error.message };
+
+  return { ok: true, filled: rows.length };
+}
