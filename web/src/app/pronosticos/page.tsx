@@ -36,10 +36,10 @@ export default async function PronosticosPage() {
     {
       key: 'ko',
       title: 'Marcadores de eliminatorias',
-      desc: 'Se abren a medida que se conocen los pairings',
+      desc: 'Predice los marcadores en vivo (R32 → final). Cada ronda se abre cuando el admin asigne los equipos.',
       pts: '160 pts',
       href: '/pronosticos/eliminatorias',
-      open: false, // se abrirá cuando los partidos estén definidos
+      open: true,
     },
   ];
 
