@@ -1,13 +1,13 @@
 // Genera dos artefactos a partir de scripts/tournament-config.json:
 //
-//   1. sql/002_seed_tournament.sql    — INSERTs para Supabase (teams, matches, phase_locks)
-//   2. docs/Polla-Mundial-2026-Template.xlsx — Excel auto-calculado para participantes
+//   1. sql/002_seed_tournament.sql                — INSERTs para Supabase
+//   2. docs/Polla-Mundial-2026-Template.xlsx      — Excel auto-calculado (ExcelJS)
 //
 // Uso:  cd web && npm run generate:tournament
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const CONFIG_PATH = path.join(ROOT, 'scripts', 'tournament-config.json');
@@ -26,26 +26,16 @@ interface Config {
 
 const cfg: Config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
 
-// ===== Helpers de equipos =====
+// ===== Helpers =====
+function teamLabel(code: string): string { return cfg.teamCatalog[code]?.name ?? code; }
+function teamFlag(code: string):  string { return cfg.teamCatalog[code]?.flag ?? ''; }
+function sqlEscape(s: string):    string { return s.replace(/'/g, "''"); }
 
-function teamLabel(code: string): string {
-  return cfg.teamCatalog[code]?.name ?? code;
-}
-function teamFlag(code: string): string {
-  return cfg.teamCatalog[code]?.flag ?? '';
-}
-function sqlEscape(s: string): string {
-  return s.replace(/'/g, "''");
-}
-
-// Genera los 6 partidos de un grupo de 4 (C(4,2) = 6).
 function groupMatches(teams: string[]): Array<[string, string]> {
   const out: Array<[string, string]> = [];
-  for (let i = 0; i < teams.length; i++) {
-    for (let j = i + 1; j < teams.length; j++) {
+  for (let i = 0; i < teams.length; i++)
+    for (let j = i + 1; j < teams.length; j++)
       out.push([teams[i], teams[j]]);
-    }
-  }
   return out;
 }
 
@@ -53,362 +43,593 @@ function groupMatches(teams: string[]): Array<[string, string]> {
 // 1. SQL seed
 // ============================================================
 
-const sql: string[] = [];
-sql.push('-- =====================================================================');
-sql.push(`-- Seed del torneo: ${cfg.tournamentName}`);
-sql.push(`-- Generado desde scripts/tournament-config.json`);
-sql.push('-- =====================================================================');
-sql.push('');
+{
+  const sql: string[] = [];
+  sql.push('-- =====================================================================');
+  sql.push(`-- Seed del torneo: ${cfg.tournamentName}`);
+  sql.push('-- Generado desde scripts/tournament-config.json');
+  sql.push('-- =====================================================================');
+  sql.push('');
 
-sql.push('-- Equipos');
-sql.push('insert into public.teams (code, name, group_letter, flag_emoji) values');
-const teamRows: string[] = [];
-for (const [letter, teams] of Object.entries(cfg.groups)) {
-  for (const code of teams) {
-    teamRows.push(
-      `  ('${sqlEscape(code)}', '${sqlEscape(teamLabel(code))}', '${letter}', '${teamFlag(code)}')`,
-    );
-  }
+  sql.push('-- Equipos');
+  sql.push('insert into public.teams (code, name, group_letter, flag_emoji) values');
+  const teamRows: string[] = [];
+  for (const [letter, teams] of Object.entries(cfg.groups))
+    for (const code of teams)
+      teamRows.push(`  ('${sqlEscape(code)}', '${sqlEscape(teamLabel(code))}', '${letter}', '${teamFlag(code)}')`);
+  sql.push(teamRows.join(',\n') + '\non conflict (code) do nothing;\n');
+
+  sql.push('-- Partidos de fase de grupos (72)');
+  sql.push('insert into public.matches (stage, group_letter, external_code, home_team_id, away_team_id) values');
+  const matchRows: string[] = [];
+  let matchNum = 1;
+  for (const [letter, teams] of Object.entries(cfg.groups))
+    for (const [home, away] of groupMatches(teams)) {
+      const code = `G-${letter}-${String(matchNum).padStart(2, '0')}`;
+      matchRows.push(`  ('group', '${letter}', '${code}', (select id from public.teams where code = '${sqlEscape(home)}'), (select id from public.teams where code = '${sqlEscape(away)}'))`);
+      matchNum++;
+    }
+  sql.push(matchRows.join(',\n') + '\non conflict (external_code) do nothing;\n');
+
+  sql.push('-- Partidos de eliminatorias (equipos por determinar al avanzar las rondas)');
+  const knockoutCounts = { r32: 16, r16: 8, qf: 4, sf: 2, tp: 1, final: 1 } as const;
+  sql.push('insert into public.matches (stage, external_code) values');
+  const koRows: string[] = [];
+  for (const [stage, count] of Object.entries(knockoutCounts))
+    for (let i = 1; i <= count; i++)
+      koRows.push(`  ('${stage}', '${stage.toUpperCase()}-${String(i).padStart(2, '0')}')`);
+  sql.push(koRows.join(',\n') + '\non conflict (external_code) do nothing;\n');
+
+  sql.push('-- Fechas de cierre de pronósticos');
+  sql.push('insert into public.phase_locks (phase, locks_at) values');
+  sql.push(Object.entries(cfg.deadlines).map(([phase, iso]) => `  ('${phase}', '${iso}')`).join(',\n')
+    + '\non conflict (phase) do update set locks_at = excluded.locks_at;\n');
+
+  fs.mkdirSync(path.dirname(OUT_SQL), { recursive: true });
+  fs.writeFileSync(OUT_SQL, sql.join('\n'));
+  console.log(`✔  SQL escrito en ${path.relative(ROOT, OUT_SQL)}`);
 }
-sql.push(teamRows.join(',\n') + '\non conflict (code) do nothing;');
-sql.push('');
-
-sql.push('-- Partidos de fase de grupos (72)');
-sql.push('insert into public.matches (stage, group_letter, external_code, home_team_id, away_team_id) values');
-const matchRows: string[] = [];
-let matchNum = 1;
-for (const [letter, teams] of Object.entries(cfg.groups)) {
-  for (const [home, away] of groupMatches(teams)) {
-    const code = `G-${letter}-${String(matchNum).padStart(2, '0')}`;
-    matchRows.push(
-      `  ('group', '${letter}', '${code}', (select id from public.teams where code = '${sqlEscape(home)}'), (select id from public.teams where code = '${sqlEscape(away)}'))`,
-    );
-    matchNum++;
-  }
-}
-sql.push(matchRows.join(',\n') + '\non conflict (external_code) do nothing;');
-sql.push('');
-
-sql.push('-- Partidos de eliminatorias (equipos por determinar al avanzar las rondas)');
-const knockoutCounts = { r32: 16, r16: 8, qf: 4, sf: 2, tp: 1, final: 1 } as const;
-sql.push('insert into public.matches (stage, external_code) values');
-const koRows: string[] = [];
-for (const [stage, count] of Object.entries(knockoutCounts)) {
-  for (let i = 1; i <= count; i++) {
-    const code = `${stage.toUpperCase()}-${String(i).padStart(2, '0')}`;
-    koRows.push(`  ('${stage}', '${code}')`);
-  }
-}
-sql.push(koRows.join(',\n') + '\non conflict (external_code) do nothing;');
-sql.push('');
-
-sql.push('-- Fechas de cierre de pronósticos');
-sql.push('insert into public.phase_locks (phase, locks_at) values');
-const lockRows = Object.entries(cfg.deadlines).map(
-  ([phase, iso]) => `  ('${phase}', '${iso}')`,
-);
-sql.push(lockRows.join(',\n') + '\non conflict (phase) do update set locks_at = excluded.locks_at;');
-sql.push('');
-
-fs.mkdirSync(path.dirname(OUT_SQL), { recursive: true });
-fs.writeFileSync(OUT_SQL, sql.join('\n'));
-console.log(`✔  SQL escrito en ${path.relative(ROOT, OUT_SQL)}`);
 
 // ============================================================
-// 2. Excel template con auto-cálculo
+// 2. Excel template con auto-cálculo (ExcelJS)
 // ============================================================
 
-type CellValue = string | number | { f: string; v?: string | number; t?: string };
-type Row = CellValue[];
+// Paleta: 3 colores estándar
+const COLORS = {
+  header:  'FF1F2937',   // gris oscuro casi negro — secciones, títulos
+  input:   'FFFEF3C7',   // amarillo suave — celdas que el usuario llena
+  auto:    'FFDBEAFE',   // azul suave — celdas auto-calculadas
+  accent:  'FF15803D',   // verde — "PASA" / clasifica
+  bad:     'FFB91C1C',   // rojo opcional — eliminados
+  light:   'FFF8FAFC',   // gris claro — separadores
+} as const;
 
-const wb = XLSX.utils.book_new();
+const wb = new ExcelJS.Workbook();
+wb.creator = 'Generador Polla 2026';
+wb.created = new Date();
 
-// ---------- Hoja 1: INSTRUCCIONES ----------
-const instr: Row[] = [
-  ['POLLA MUNDIAL 2026 — INSTRUCCIONES Y SISTEMA DE PUNTOS'],
-  [],
-  ['Total a repartir: 1.000 puntos'],
-  [],
-  ['Categoría', 'Pts c/u', 'Cant.', 'Total'],
-  ['Acertar ganador del partido (1X2)', 2, 72, 144],
-  ['Bonus marcador exacto (encima del anterior)', 3, 72, 216],
-  ['Posición en el grupo: 1°', 4, 12, 48],
-  ['Posición en el grupo: 2°', 3, 12, 36],
-  ['Posición en el grupo: 3°', 2, 12, 24],
-  ['Posición en el grupo: 4°', 1, 12, 12],
-  ['Clasificado a dieciseisavos (R32)', 2, 32, 64],
-  ['Clasificado a octavos', 3, 16, 48],
-  ['Clasificado a cuartos', 6, 8, 48],
-  ['Clasificado a semifinales', 12, 4, 48],
-  ['Clasificado a la final', 22, 2, 44],
-  ['Campeón', 90, 1, 90],
-  ['Subcampeón', 60, 1, 60],
-  ['Tercer lugar', 40, 1, 40],
-  ['Cuarto lugar', 28, 1, 28],
-  ['Goleador del mundial', 50, 1, 50],
-  ['TOTAL', '', '', 1000],
-  [],
-  ['Cómo se usa este archivo:'],
-  ['  1. Llena tus datos en la hoja JUGADOR.'],
-  ['  2. En la hoja FASE_DE_GRUPOS, llena los marcadores de los 72 partidos.'],
-  ['     Las tablas de posiciones de cada grupo y la lista de clasificados a R32'],
-  ['     (top 2 por grupo) se calculan SOLAS a partir de tus marcadores.'],
-  ['  3. Para los 8 cupos extra (mejores 3ros), elige a mano cuáles consideras que'],
-  ['     pasan, ayudándote de la tabla de "Terceros candidatos" que se llena sola.'],
-  ['  4. En la hoja ELIMINATORIAS llena tus 16 a octavos, 8 a cuartos, 4 a semi y 2 a final.'],
-  ['  5. En la hoja TOP_GOLEADOR llena el top 4 final y el goleador.'],
-  ['  6. Manda el archivo al admin o súbelo en la web.'],
-  [],
-  ['Notas de puntuación:'],
-  ['• Predecir 2-1 cuando termina 2-1 → 5 pts (2 ganador + 3 marcador exacto)'],
-  ['• Predecir 2-1 cuando termina 3-0 → 2 pts (acierta ganador, no marcador)'],
-  ['• Las posiciones de grupo y los clasificados se evalúan independientemente.'],
-  ['• Si hay empate de goleadores, todos los que predijeron a CUALQUIERA ganan los 50.'],
-  [],
-  ['Fechas límite de pronósticos:'],
-  ...Object.entries(cfg.deadlines).map(([phase, iso]) => [phase, iso] as Row),
-];
-const ws1 = XLSX.utils.aoa_to_sheet(instr);
-ws1['!cols'] = [{ wch: 50 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
-XLSX.utils.book_append_sheet(wb, ws1, 'INSTRUCCIONES');
+// ---------- Helpers de estilo ----------
+function styleHeader(cell: ExcelJS.Cell) {
+  cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 };
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.header } };
+  cell.alignment = { vertical: 'middle', horizontal: 'left' };
+}
+function styleSubHeader(cell: ExcelJS.Cell) {
+  cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.header } };
+  cell.alignment = { vertical: 'middle', horizontal: 'center' };
+}
+function styleInput(cell: ExcelJS.Cell) {
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.input } };
+  cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  cell.border = {
+    top:    { style: 'thin', color: { argb: 'FFD1D5DB' } },
+    bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+    left:   { style: 'thin', color: { argb: 'FFD1D5DB' } },
+    right:  { style: 'thin', color: { argb: 'FFD1D5DB' } },
+  };
+}
+function styleAuto(cell: ExcelJS.Cell) {
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.auto } };
+  cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  cell.font = { color: { argb: 'FF1E3A8A' } };
+}
+function styleTeam(cell: ExcelJS.Cell) {
+  cell.font = { bold: true };
+  cell.alignment = { vertical: 'middle', horizontal: 'left' };
+}
+function styleTotalRow(cell: ExcelJS.Cell) {
+  cell.font = { bold: true, size: 11 };
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.light } };
+}
 
-// ---------- Hoja 2: JUGADOR ----------
-const jugador: Row[] = [
-  ['DATOS DEL JUGADOR'],
-  [],
-  ['Nombre completo:', ''],
-  ['Email:', ''],
-  ['Celular:', ''],
-];
-const ws2 = XLSX.utils.aoa_to_sheet(jugador);
-ws2['!cols'] = [{ wch: 22 }, { wch: 45 }];
-XLSX.utils.book_append_sheet(wb, ws2, 'JUGADOR');
-
-// ---------- Hoja 3: FASE_DE_GRUPOS (la pieza con auto-cálculo) ----------
-//
-// Layout por grupo:
-//   row+0  "GRUPO X: T1, T2, T3, T4"
-//   row+1  headers: # | Local | "vs" | Visitante | GL | GV
-//   row+2..row+7  6 partidos
-//   row+9  headers: Pos | Equipo | PJ | G | E | P | GF | GC | DG | Pts
-//   row+10..row+13  4 equipos (orden config) con fórmulas
-//   row+14  separador
-//
-// Cada bloque ocupa 16 filas.
-
-const groupRows: Row[] = [];
-groupRows.push(['FASE DE GRUPOS — 72 PARTIDOS', '', '', '', '', '']);
-groupRows.push(['Llena solo las columnas GL (goles local) y GV (goles visitante). El resto se calcula solo.']);
-groupRows.push([]);
-
-const BLOCK_HEIGHT = 16;
-const BLOCK_START_ROW = groupRows.length; // 0-indexed in array, will be base for cell refs
-
-// Recordamos para cada equipo de cada grupo dónde quedó su fila de standings
-const teamCells: Record<string, { row: number /* 1-indexed */; group: string }> = {};
-
-// También recordamos el rango de filas de marcadores por grupo
-interface GroupMatchRange { firstRow: number; lastRow: number; }
-const groupMatchRanges: Record<string, GroupMatchRange> = {};
-
-const groupOrder = Object.keys(cfg.groups);  // 'A'..'L'
-
-groupOrder.forEach((letter, idx) => {
-  const teams = cfg.groups[letter];
-  const blockStart = BLOCK_START_ROW + idx * BLOCK_HEIGHT; // 0-indexed in array
-  const headerLine = `GRUPO ${letter}: ${teams.map(teamLabel).join(' · ')}`;
-
-  // Asegúrate de que groupRows tenga suficiente longitud antes de escribir
-  while (groupRows.length < blockStart + BLOCK_HEIGHT) groupRows.push([]);
-
-  groupRows[blockStart] = [headerLine];
-  groupRows[blockStart + 1] = ['#', 'Local', 'vs', 'Visitante', 'GL', 'GV'];
-
-  // Filas de partidos (6 por grupo)
-  const matches = groupMatches(teams);
-  matches.forEach(([home, away], i) => {
-    const matchRowIdx = blockStart + 2 + i;
-    groupRows[matchRowIdx] = [
-      i + 1,
-      teamLabel(home),
-      'vs',
-      teamLabel(away),
-      '',   // GL — usuario llena
-      '',   // GV — usuario llena
-    ];
+// =========================================================
+// Hoja 1: INSTRUCCIONES
+// =========================================================
+{
+  const ws = wb.addWorksheet('INSTRUCCIONES', {
+    views: [{ state: 'frozen', ySplit: 1 }],
   });
 
-  // Rango de partidos en notación Excel (1-indexed). Estas filas son blockStart+2..blockStart+7
-  const matchFirst1 = blockStart + 2 + 1; // +1 porque XLSX es 1-indexed
-  const matchLast1  = blockStart + 7 + 1;
-  groupMatchRanges[letter] = { firstRow: matchFirst1, lastRow: matchLast1 };
+  ws.columns = [{ width: 50 }, { width: 12 }, { width: 12 }, { width: 12 }];
 
-  // Standings (4 equipos)
-  const standHeaderIdx = blockStart + 9;
-  groupRows[standHeaderIdx] = ['Pos', 'Equipo', 'PJ', 'G', 'E', 'P', 'GF', 'GC', 'DG', 'Pts'];
+  ws.mergeCells('A1:D1');
+  const title = ws.getCell('A1');
+  title.value = 'POLLA MUNDIAL 2026 — INSTRUCCIONES Y SISTEMA DE PUNTOS';
+  styleHeader(title);
+  title.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 14 };
+  ws.getRow(1).height = 28;
 
-  teams.forEach((teamCode, i) => {
-    const standRowIdx = blockStart + 10 + i;     // 0-indexed
-    const xlRow = standRowIdx + 1;               // 1-indexed para Excel
-    teamCells[teamCode] = { row: xlRow, group: letter };
+  ws.getCell('A3').value = 'Total a repartir: 1.160 puntos';
+  ws.getCell('A3').font = { bold: true, size: 12 };
 
-    const teamName = teamLabel(teamCode);
-    // Refs a columnas de marcadores en este grupo
-    const localCol  = 'B';
-    const visitCol  = 'D';
-    const glCol     = 'E';
-    const gvCol     = 'F';
-    const lr        = `${localCol}${matchFirst1}:${localCol}${matchLast1}`;
-    const vr        = `${visitCol}${matchFirst1}:${visitCol}${matchLast1}`;
-    const gl        = `${glCol}${matchFirst1}:${glCol}${matchLast1}`;
-    const gv        = `${gvCol}${matchFirst1}:${gvCol}${matchLast1}`;
+  const headerRow = ['Categoría', 'Pts c/u', 'Cant.', 'Total'];
+  ws.getRow(5).values = headerRow;
+  headerRow.forEach((_, i) => styleSubHeader(ws.getCell(5, i + 1)));
 
-    // Refs a columnas de standings para fórmulas de posición (intragrupo)
-    const ptsRange = `J${blockStart + 10 + 1}:J${blockStart + 13 + 1}`;
-    const dgRange  = `I${blockStart + 10 + 1}:I${blockStart + 13 + 1}`;
-    const gfRange  = `G${blockStart + 10 + 1}:G${blockStart + 13 + 1}`;
-
-    // Fórmulas (sin "=" — SheetJS lo agrega al escribir).
-    // Filtro de celdas vacías con (cell<>"") para que partidos sin marcador no cuenten.
-    const escName = teamName.replace(/"/g, '""');
-    const isLoc = `($${localCol}$${matchFirst1}:$${localCol}$${matchLast1}="${escName}")`;
-    const isVis = `($${visitCol}$${matchFirst1}:$${visitCol}$${matchLast1}="${escName}")`;
-    const glr   = `$${glCol}$${matchFirst1}:$${glCol}$${matchLast1}`;
-    const gvr   = `$${gvCol}$${matchFirst1}:$${gvCol}$${matchLast1}`;
-    const filled = `(${glr}<>"")*(${gvr}<>"")`;
-
-    const fG  = `SUMPRODUCT(${isLoc}*(${glr}>${gvr})*${filled})+SUMPRODUCT(${isVis}*(${gvr}>${glr})*${filled})`;
-    const fE  = `SUMPRODUCT((${isLoc}+${isVis})*(${glr}=${gvr})*${filled})`;
-    const fP  = `SUMPRODUCT(${isLoc}*(${glr}<${gvr})*${filled})+SUMPRODUCT(${isVis}*(${gvr}<${glr})*${filled})`;
-    const fGF = `SUMPRODUCT(${isLoc}*${glr}*${filled})+SUMPRODUCT(${isVis}*${gvr}*${filled})`;
-    const fGC = `SUMPRODUCT(${isLoc}*${gvr}*${filled})+SUMPRODUCT(${isVis}*${glr}*${filled})`;
-    const fPJ  = `D${xlRow}+E${xlRow}+F${xlRow}`;
-    const fDG  = `G${xlRow}-H${xlRow}`;
-    const fPts = `D${xlRow}*3+E${xlRow}`;
-    const fPosSimple = `SUMPRODUCT((${ptsRange}>J${xlRow})*1)+SUMPRODUCT((${ptsRange}=J${xlRow})*(${dgRange}>I${xlRow}))+SUMPRODUCT((${ptsRange}=J${xlRow})*(${dgRange}=I${xlRow})*(${gfRange}>G${xlRow}))+1`;
-
-    groupRows[standRowIdx] = [
-      { f: fPosSimple, t: 'n' },                  // A: Pos
-      teamName,                                    // B: Equipo
-      { f: fPJ, t: 'n' },                          // C: PJ
-      { f: fG, t: 'n' },                           // D: G
-      { f: fE, t: 'n' },                           // E: E
-      { f: fP, t: 'n' },                           // F: P
-      { f: fGF, t: 'n' },                          // G: GF
-      { f: fGC, t: 'n' },                          // H: GC
-      { f: fDG, t: 'n' },                          // I: DG
-      { f: fPts, t: 'n' },                         // J: Pts
-    ];
+  const rows = [
+    ['Acertar ganador del partido (1X2)', 2, 72, 144],
+    ['Bonus marcador exacto (sobre el anterior)', 3, 72, 216],
+    ['Posición en el grupo: 1°', 4, 12, 48],
+    ['Posición en el grupo: 2°', 3, 12, 36],
+    ['Posición en el grupo: 3°', 2, 12, 24],
+    ['Posición en el grupo: 4°', 1, 12, 12],
+    ['Clasificado a R32 (dieciseisavos)', 2, 32, 64],
+    ['Clasificado a octavos',  3, 16, 48],
+    ['Clasificado a cuartos',  6,  8, 48],
+    ['Clasificado a semis',   12,  4, 48],
+    ['Clasificado a la final',22,  2, 44],
+    ['Marcador en partidos de eliminatorias (32 partidos)', '2 + 3', 32, 160],
+    ['Campeón',     90, 1, 90],
+    ['Subcampeón',  60, 1, 60],
+    ['Tercer lugar',40, 1, 40],
+    ['Cuarto lugar',28, 1, 28],
+    ['Goleador del mundial', 50, 1, 50],
+  ];
+  rows.forEach((r, i) => {
+    const rowIdx = 6 + i;
+    ws.getRow(rowIdx).values = r;
+    if (typeof r[0] === 'string' && r[0].toString().startsWith('Posición')) {
+      // sub-items: indentar
+      ws.getCell(rowIdx, 1).font = { italic: true };
+    }
   });
-});
 
-// Sección R32 qualifiers
-groupRows.push([]);
-groupRows.push(['CLASIFICADOS A R32 — TOP 2 DE CADA GRUPO (calculado automáticamente)']);
-groupRows.push(['Grupo', '1° (auto)', '2° (auto)', '3° (candidato, eliges abajo)']);
+  const totalRowIdx = 6 + rows.length;
+  ws.getRow(totalRowIdx).values = ['TOTAL', '', '', 1160];
+  for (let c = 1; c <= 4; c++) styleTotalRow(ws.getCell(totalRowIdx, c));
 
-const r32SectionStartRow = groupRows.length;
-groupOrder.forEach((letter) => {
-  const teams = cfg.groups[letter];
-  // Standings de este grupo: filas (rowOfFirstStand)..(rowOfFirstStand+3)
-  const standFirstRow = BLOCK_START_ROW + groupOrder.indexOf(letter) * BLOCK_HEIGHT + 10 + 1; // 1-indexed
-  const standLastRow  = standFirstRow + 3;
-  const posRange  = `A${standFirstRow}:A${standLastRow}`;
-  const nameRange = `B${standFirstRow}:B${standLastRow}`;
-  // 1° = team where Pos = 1; 2° = where Pos = 2; 3° = where Pos = 3
-  groupRows.push([
-    letter,
-    { f: `INDEX(${nameRange},MATCH(1,${posRange},0))`, t: 's' },
-    { f: `INDEX(${nameRange},MATCH(2,${posRange},0))`, t: 's' },
-    { f: `INDEX(${nameRange},MATCH(3,${posRange},0))`, t: 's' },
-  ]);
-});
+  let r = totalRowIdx + 2;
+  ws.getCell(`A${r}`).value = 'Cómo se usa este archivo:';
+  ws.getCell(`A${r}`).font = { bold: true, size: 11 };
+  r += 1;
+  for (const t of [
+    '1. Llena tus datos en la hoja JUGADOR.',
+    '2. En FASE_DE_GRUPOS, llena los marcadores de los 72 partidos (celdas amarillas).',
+    '   Las tablas de posiciones, R32 clasificados (top 2 + 8 mejores 3ros) se calculan SOLAS.',
+    '3. En ELIMINATORIAS, llena los 16 a octavos, 8 a cuartos, 4 a semis y 2 a final.',
+    '4. En TOP_GOLEADOR, llena el top 4 final y el goleador.',
+    '5. Manda el archivo al admin o súbelo en la web.',
+  ]) { ws.getCell(`A${r}`).value = t; r++; }
 
-// Sección: 8 mejores 3ros - tabla de candidatos con Pts/DG/GF, usuario elige 8
-groupRows.push([]);
-groupRows.push(['TERCEROS CANDIDATOS — pasan los 8 mejores. Elige a mano 8 marcando "X" en la última columna.']);
-groupRows.push(['Grupo', 'Equipo (auto)', 'Pts (auto)', 'DG (auto)', 'GF (auto)', 'Pasa? (X)']);
+  r += 1;
+  ws.getCell(`A${r}`).value = 'Código de colores:';
+  ws.getCell(`A${r}`).font = { bold: true, size: 11 };
+  r += 1;
+  ws.getCell(`A${r}`).value = '🟡 Amarillo = celdas que TÚ llenas';
+  styleInput(ws.getCell(`A${r}`));
+  r += 1;
+  ws.getCell(`A${r}`).value = '🔵 Azul = celdas auto-calculadas (no las toques)';
+  styleAuto(ws.getCell(`A${r}`));
+  r += 1;
 
-groupOrder.forEach((letter) => {
-  const standFirstRow = BLOCK_START_ROW + groupOrder.indexOf(letter) * BLOCK_HEIGHT + 10 + 1;
-  const standLastRow  = standFirstRow + 3;
-  const posRange  = `A${standFirstRow}:A${standLastRow}`;
-  const nameRange = `B${standFirstRow}:B${standLastRow}`;
-  const ptsRange  = `J${standFirstRow}:J${standLastRow}`;
-  const dgRange   = `I${standFirstRow}:I${standLastRow}`;
-  const gfRange   = `G${standFirstRow}:G${standLastRow}`;
-  groupRows.push([
-    letter,
-    { f: `INDEX(${nameRange},MATCH(3,${posRange},0))`, t: 's' },
-    { f: `INDEX(${ptsRange},MATCH(3,${posRange},0))`, t: 'n' },
-    { f: `INDEX(${dgRange},MATCH(3,${posRange},0))`, t: 'n' },
-    { f: `INDEX(${gfRange},MATCH(3,${posRange},0))`, t: 'n' },
-    '',  // usuario marca X
-  ]);
-});
+  r += 1;
+  ws.getCell(`A${r}`).value = 'Notas de puntuación:';
+  ws.getCell(`A${r}`).font = { bold: true, size: 11 };
+  r += 1;
+  for (const t of [
+    '• Predecir 2-1 cuando termina 2-1 → 5 pts (2 ganador + 3 marcador exacto).',
+    '• Predecir 2-1 cuando termina 3-0 → 2 pts (acierta ganador, no marcador).',
+    '• En eliminatorias, los puntos por marcador funcionan IGUAL que en grupos.',
+    '• Si hay empate de goleadores, todos los que predijeron a cualquiera ganan los 50.',
+  ]) { ws.getCell(`A${r}`).value = t; r++; }
+}
 
-const ws3 = XLSX.utils.aoa_to_sheet(groupRows as (string | number)[][]);  // cast porque tipos
-ws3['!cols'] = [
-  { wch: 6 },   // A
-  { wch: 22 },  // B (Local/Equipo)
-  { wch: 5 },   // C (vs / PJ)
-  { wch: 22 },  // D (Visitante / G)
-  { wch: 6 },   // E (GL / E)
-  { wch: 6 },   // F (GV / P)
-  { wch: 6 },   // G (GF)
-  { wch: 6 },   // H (GC)
-  { wch: 6 },   // I (DG)
-  { wch: 6 },   // J (Pts)
-];
-XLSX.utils.book_append_sheet(wb, ws3, 'FASE_DE_GRUPOS');
+// =========================================================
+// Hoja 2: JUGADOR
+// =========================================================
+{
+  const ws = wb.addWorksheet('JUGADOR');
+  ws.columns = [{ width: 25 }, { width: 45 }];
 
-// ---------- Hoja 4: ELIMINATORIAS ----------
-const elimRows: Row[] = [
-  ['ELIMINATORIAS — Predicción de equipos que pasan a cada ronda'],
-  ['Llena los nombres de los equipos que crees que clasifican a cada ronda.'],
-  ['Para R32 ya tienes la guía de la hoja FASE_DE_GRUPOS (top 2 + 8 mejores 3ros = 32 equipos).'],
-  [],
-  ['DIECISEISAVOS DE FINAL (R32) — 32 equipos clasificados'],
-  ['#', 'Equipo'],
-  ...Array.from({ length: 32 }, (_, i) => [i + 1, '']),
-  [],
-  ['OCTAVOS DE FINAL — 16 equipos clasificados'],
-  ['#', 'Equipo'],
-  ...Array.from({ length: 16 }, (_, i) => [i + 1, '']),
-  [],
-  ['CUARTOS DE FINAL — 8 equipos clasificados'],
-  ['#', 'Equipo'],
-  ...Array.from({ length: 8 }, (_, i) => [i + 1, '']),
-  [],
-  ['SEMIFINALES — 4 equipos clasificados'],
-  ['#', 'Equipo'],
-  ...Array.from({ length: 4 }, (_, i) => [i + 1, '']),
-  [],
-  ['FINAL — 2 equipos clasificados'],
-  ['#', 'Equipo'],
-  ...Array.from({ length: 2 }, (_, i) => [i + 1, '']),
-];
-const ws4 = XLSX.utils.aoa_to_sheet(elimRows as (string | number)[][]);
-ws4['!cols'] = [{ wch: 6 }, { wch: 30 }];
-XLSX.utils.book_append_sheet(wb, ws4, 'ELIMINATORIAS');
+  ws.mergeCells('A1:B1');
+  styleHeader(ws.getCell('A1'));
+  ws.getCell('A1').value = 'DATOS DEL JUGADOR';
+  ws.getCell('A1').font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 14 };
+  ws.getRow(1).height = 28;
 
-// ---------- Hoja 5: TOP_GOLEADOR ----------
-const topRows: Row[] = [
-  ['POSICIONES FINALES DEL MUNDIAL'],
-  [],
-  ['1° (Campeón)', ''],
-  ['2° (Subcampeón)', ''],
-  ['3°', ''],
-  ['4°', ''],
-  [],
-  ['GOLEADOR DEL MUNDIAL'],
-  ['Jugador:', ''],
-];
-const ws5 = XLSX.utils.aoa_to_sheet(topRows as (string | number)[][]);
-ws5['!cols'] = [{ wch: 22 }, { wch: 30 }];
-XLSX.utils.book_append_sheet(wb, ws5, 'TOP_GOLEADOR');
+  ws.getCell('A3').value = 'Nombre completo:';
+  ws.getCell('A4').value = 'Email:';
+  ws.getCell('A5').value = 'Celular:';
+  for (let r = 3; r <= 5; r++) {
+    ws.getCell(r, 1).font = { bold: true };
+    styleInput(ws.getCell(r, 2));
+  }
+}
 
-fs.mkdirSync(path.dirname(OUT_XLSX), { recursive: true });
-XLSX.writeFile(wb, OUT_XLSX);
-console.log(`✔  Excel escrito en ${path.relative(ROOT, OUT_XLSX)}`);
-console.log(`\n✅ Listo. Revisa los archivos generados.`);
+// =========================================================
+// Hoja 3: FASE_DE_GRUPOS (la grande)
+// =========================================================
+{
+  const ws = wb.addWorksheet('FASE_DE_GRUPOS', {
+    views: [{ state: 'frozen', ySplit: 3 }],
+  });
+
+  ws.columns = [
+    { width: 6 },   // A
+    { width: 24 },  // B (Local / Equipo)
+    { width: 4 },   // C (vs / PJ)
+    { width: 24 },  // D (Visitante / G)
+    { width: 6 },   // E (GL / E)
+    { width: 6 },   // F (GV / P)
+    { width: 6 },   // G (GF)
+    { width: 6 },   // H (GC)
+    { width: 6 },   // I (DG)
+    { width: 6 },   // J (Pts)
+  ];
+
+  // Intro
+  ws.mergeCells('A1:J1');
+  ws.getCell('A1').value = 'FASE DE GRUPOS — 72 PARTIDOS';
+  styleHeader(ws.getCell('A1'));
+  ws.getCell('A1').font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 14 };
+  ws.getRow(1).height = 28;
+
+  ws.mergeCells('A2:J2');
+  ws.getCell('A2').value = '🟡 Llena solo las columnas GL y GV. 🔵 Las posiciones y clasificados se calculan solos.';
+  ws.getCell('A2').font = { italic: true, size: 10 };
+
+  const groupOrder = Object.keys(cfg.groups);
+  const BLOCK_HEIGHT = 16;
+  const BLOCK_START_ROW = 4;   // 1-indexed
+
+  // Mapea cada equipo a su fila de standings (1-indexed)
+  type StandRow = { row: number; group: string };
+  const standOf = new Map<string, StandRow>();
+
+  groupOrder.forEach((letter, idx) => {
+    const teams = cfg.groups[letter];
+    const block = BLOCK_START_ROW + idx * BLOCK_HEIGHT;
+    const matchFirst = block + 2;    // 1-indexed first match row
+    const matchLast  = block + 7;    // 1-indexed last match row
+    const standFirst = block + 10;
+    const standLast  = block + 13;
+
+    // Group header (merge A:J)
+    ws.mergeCells(block, 1, block, 10);
+    const gh = ws.getCell(block, 1);
+    gh.value = `GRUPO ${letter}: ${teams.map(teamLabel).join(' · ')}`;
+    styleHeader(gh);
+    gh.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 };
+
+    // Sub-headers de partidos
+    const subHeaders = ['#', 'Local', 'vs', 'Visitante', 'GL', 'GV'];
+    subHeaders.forEach((v, i) => {
+      const c = ws.getCell(block + 1, i + 1);
+      c.value = v;
+      styleSubHeader(c);
+    });
+
+    // Partidos
+    const matches = groupMatches(teams);
+    matches.forEach(([home, away], i) => {
+      const r = block + 2 + i;
+      ws.getCell(r, 1).value = i + 1;
+      ws.getCell(r, 1).alignment = { horizontal: 'center' };
+      ws.getCell(r, 2).value = teamLabel(home);
+      ws.getCell(r, 3).value = 'vs';
+      ws.getCell(r, 3).alignment = { horizontal: 'center' };
+      ws.getCell(r, 4).value = teamLabel(away);
+      // GL y GV: input
+      styleInput(ws.getCell(r, 5));
+      styleInput(ws.getCell(r, 6));
+    });
+
+    // Sub-headers de standings
+    const standHeaders = ['Pos', 'Equipo', 'PJ', 'G', 'E', 'P', 'GF', 'GC', 'DG', 'Pts'];
+    standHeaders.forEach((v, i) => {
+      const c = ws.getCell(block + 9, i + 1);
+      c.value = v;
+      styleSubHeader(c);
+    });
+
+    // Standings con fórmulas
+    teams.forEach((code, i) => {
+      const r = standFirst + i;
+      const xlRow = r;
+      standOf.set(code, { row: xlRow, group: letter });
+
+      const teamName = teamLabel(code);
+      const escName = teamName.replace(/"/g, '""');
+      const localR = `$B$${matchFirst}:$B$${matchLast}`;
+      const visitR = `$D$${matchFirst}:$D$${matchLast}`;
+      const glR    = `$E$${matchFirst}:$E$${matchLast}`;
+      const gvR    = `$F$${matchFirst}:$F$${matchLast}`;
+      const isLoc  = `(${localR}="${escName}")`;
+      const isVis  = `(${visitR}="${escName}")`;
+      const filled = `(${glR}<>"")*(${gvR}<>"")`;
+
+      // Pts (J), DG (I), GF (G) rangos del grupo (para fórmula de Pos)
+      const ptsRange = `J${standFirst}:J${standLast}`;
+      const dgRange  = `I${standFirst}:I${standLast}`;
+      const gfRange  = `G${standFirst}:G${standLast}`;
+
+      const fG  = `SUMPRODUCT(${isLoc}*(${glR}>${gvR})*${filled})+SUMPRODUCT(${isVis}*(${gvR}>${glR})*${filled})`;
+      const fE  = `SUMPRODUCT((${isLoc}+${isVis})*(${glR}=${gvR})*${filled})`;
+      const fP  = `SUMPRODUCT(${isLoc}*(${glR}<${gvR})*${filled})+SUMPRODUCT(${isVis}*(${gvR}<${glR})*${filled})`;
+      const fGF = `SUMPRODUCT(${isLoc}*${glR}*${filled})+SUMPRODUCT(${isVis}*${gvR}*${filled})`;
+      const fGC = `SUMPRODUCT(${isLoc}*${gvR}*${filled})+SUMPRODUCT(${isVis}*${glR}*${filled})`;
+      const fPJ  = `D${xlRow}+E${xlRow}+F${xlRow}`;
+      const fDG  = `G${xlRow}-H${xlRow}`;
+      const fPts = `D${xlRow}*3+E${xlRow}`;
+      const fPos = `SUMPRODUCT((${ptsRange}>J${xlRow})*1)+SUMPRODUCT((${ptsRange}=J${xlRow})*(${dgRange}>I${xlRow}))+SUMPRODUCT((${ptsRange}=J${xlRow})*(${dgRange}=I${xlRow})*(${gfRange}>G${xlRow}))+1`;
+
+      // A: Pos
+      const aCell = ws.getCell(r, 1);
+      aCell.value = { formula: fPos };
+      styleAuto(aCell);
+      aCell.font = { bold: true, color: { argb: 'FF1E3A8A' } };
+
+      // B: Equipo
+      const bCell = ws.getCell(r, 2);
+      bCell.value = teamName;
+      styleTeam(bCell);
+
+      // Resto: fórmulas auto
+      const autoFormulas: Array<[number, string]> = [
+        [3, fPJ], [4, fG], [5, fE], [6, fP], [7, fGF], [8, fGC], [9, fDG], [10, fPts],
+      ];
+      for (const [col, f] of autoFormulas) {
+        const c = ws.getCell(r, col);
+        c.value = { formula: f };
+        styleAuto(c);
+        if (col === 10) c.font = { bold: true, color: { argb: 'FF1E3A8A' } };
+      }
+    });
+  });
+
+  // ----- Sección R32 (top 2 + 8 mejores 3ros) -----
+  let r = BLOCK_START_ROW + groupOrder.length * BLOCK_HEIGHT + 1;
+  ws.mergeCells(r, 1, r, 10);
+  ws.getCell(r, 1).value = 'CLASIFICADOS A R32 (auto-calculado)';
+  styleHeader(ws.getCell(r, 1));
+  ws.getCell(r, 1).font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 };
+  r += 1;
+
+  // Top 2 por grupo
+  ws.mergeCells(r, 1, r, 10);
+  ws.getCell(r, 1).value = 'Top 2 por grupo (24 equipos)';
+  ws.getCell(r, 1).font = { bold: true, size: 11 };
+  r += 1;
+
+  const top2HeaderRow = r;
+  ['Grupo', '1°', '2°'].forEach((v, i) => {
+    const c = ws.getCell(top2HeaderRow, i + 1);
+    c.value = v;
+    styleSubHeader(c);
+  });
+  r += 1;
+
+  groupOrder.forEach((letter, idx) => {
+    const block = BLOCK_START_ROW + idx * BLOCK_HEIGHT;
+    const standFirst = block + 10;
+    const standLast  = block + 13;
+    const posR  = `A${standFirst}:A${standLast}`;
+    const nameR = `B${standFirst}:B${standLast}`;
+    ws.getCell(r, 1).value = letter;
+    ws.getCell(r, 1).font = { bold: true };
+    ws.getCell(r, 1).alignment = { horizontal: 'center' };
+    const c1 = ws.getCell(r, 2);
+    c1.value = { formula: `INDEX(${nameR},MATCH(1,${posR},0))` };
+    styleAuto(c1);
+    const c2 = ws.getCell(r, 3);
+    c2.value = { formula: `INDEX(${nameR},MATCH(2,${posR},0))` };
+    styleAuto(c2);
+    r += 1;
+  });
+
+  r += 1;
+  ws.mergeCells(r, 1, r, 10);
+  ws.getCell(r, 1).value = '8 mejores 3ros — el ranking se hace globalmente por Pts → DG → GF';
+  ws.getCell(r, 1).font = { bold: true, size: 11 };
+  r += 1;
+
+  const tercerosHeaderRow = r;
+  ['Grupo', '3° (auto)', 'Pts', 'DG', 'GF', '¿Pasa?'].forEach((v, i) => {
+    const c = ws.getCell(tercerosHeaderRow, i + 1);
+    c.value = v;
+    styleSubHeader(c);
+  });
+  r += 1;
+
+  // Filas de los 12 terceros (auto)
+  const tercerosFirstRow = r;
+  groupOrder.forEach((letter, idx) => {
+    const block = BLOCK_START_ROW + idx * BLOCK_HEIGHT;
+    const standFirst = block + 10;
+    const standLast  = block + 13;
+    const posR  = `A${standFirst}:A${standLast}`;
+    const nameR = `B${standFirst}:B${standLast}`;
+    const ptsR  = `J${standFirst}:J${standLast}`;
+    const dgR   = `I${standFirst}:I${standLast}`;
+    const gfR   = `G${standFirst}:G${standLast}`;
+
+    ws.getCell(r, 1).value = letter;
+    ws.getCell(r, 1).font = { bold: true };
+    ws.getCell(r, 1).alignment = { horizontal: 'center' };
+
+    const cName = ws.getCell(r, 2);
+    cName.value = { formula: `INDEX(${nameR},MATCH(3,${posR},0))` };
+    styleAuto(cName);
+
+    const cPts = ws.getCell(r, 3);
+    cPts.value = { formula: `INDEX(${ptsR},MATCH(3,${posR},0))` };
+    styleAuto(cPts);
+
+    const cDg = ws.getCell(r, 4);
+    cDg.value = { formula: `INDEX(${dgR},MATCH(3,${posR},0))` };
+    styleAuto(cDg);
+
+    const cGf = ws.getCell(r, 5);
+    cGf.value = { formula: `INDEX(${gfR},MATCH(3,${posR},0))` };
+    styleAuto(cGf);
+
+    // ¿Pasa? — auto: rank entre los 12 terceros, top 8 pasa
+    r += 1;
+  });
+  const tercerosLastRow = r - 1;
+
+  // Llenar columna "¿Pasa?" con fórmulas que usan los rangos completos
+  const allPtsR = `C${tercerosFirstRow}:C${tercerosLastRow}`;
+  const allDgR  = `D${tercerosFirstRow}:D${tercerosLastRow}`;
+  const allGfR  = `E${tercerosFirstRow}:E${tercerosLastRow}`;
+  for (let rr = tercerosFirstRow; rr <= tercerosLastRow; rr++) {
+    const myPts = `C${rr}`;
+    const myDg  = `D${rr}`;
+    const myGf  = `E${rr}`;
+    // Rank global entre los 12 terceros: cuántos son estrictamente mejores +1
+    const rankFormula = `SUMPRODUCT((${allPtsR}>${myPts})*1)+SUMPRODUCT((${allPtsR}=${myPts})*(${allDgR}>${myDg}))+SUMPRODUCT((${allPtsR}=${myPts})*(${allDgR}=${myDg})*(${allGfR}>${myGf}))+1`;
+    const passFormula = `IF(${rankFormula}<=8,"✓ PASA","—")`;
+    const cell = ws.getCell(rr, 6);
+    cell.value = { formula: passFormula };
+    cell.font = { bold: true };
+    cell.alignment = { horizontal: 'center' };
+    // Coloreo condicional manual via formula no es directo; aplicamos estilo neutro
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.auto } };
+  }
+
+  // Formato condicional: si la celda dice "✓ PASA" → verde, si "—" → gris
+  ws.addConditionalFormatting({
+    ref: `F${tercerosFirstRow}:F${tercerosLastRow}`,
+    rules: [
+      {
+        type: 'containsText',
+        operator: 'containsText',
+        text: '✓ PASA',
+        priority: 1,
+        style: {
+          font: { bold: true, color: { argb: 'FFFFFFFF' } },
+          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.accent } },
+        },
+      },
+      {
+        type: 'containsText',
+        operator: 'containsText',
+        text: '—',
+        priority: 2,
+        style: {
+          font: { color: { argb: 'FF6B7280' } },
+          fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.light } },
+        },
+      },
+    ],
+  });
+}
+
+// =========================================================
+// Hoja 4: ELIMINATORIAS (predicción de clasificados por ronda)
+// =========================================================
+{
+  const ws = wb.addWorksheet('ELIMINATORIAS');
+  ws.columns = [{ width: 6 }, { width: 32 }];
+
+  ws.mergeCells('A1:B1');
+  styleHeader(ws.getCell('A1'));
+  ws.getCell('A1').value = 'ELIMINATORIAS — Predicción de clasificados por ronda';
+  ws.getCell('A1').font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 14 };
+  ws.getRow(1).height = 28;
+
+  ws.mergeCells('A2:B2');
+  ws.getCell('A2').value = 'Llena los equipos que crees que clasifican a cada ronda. (Los marcadores de cada partido se llenan en VIVO en la web.)';
+  ws.getCell('A2').font = { italic: true, size: 10 };
+
+  const sections: Array<[string, number]> = [
+    ['DIECISEISAVOS (R32) — 32 equipos', 32],
+    ['OCTAVOS — 16 equipos', 16],
+    ['CUARTOS — 8 equipos', 8],
+    ['SEMIFINALES — 4 equipos', 4],
+    ['FINAL — 2 equipos', 2],
+  ];
+
+  let r = 4;
+  for (const [title, count] of sections) {
+    ws.mergeCells(r, 1, r, 2);
+    ws.getCell(r, 1).value = title;
+    ws.getCell(r, 1).font = { bold: true, size: 11 };
+    ws.getCell(r, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.light } };
+    r += 1;
+
+    ws.getCell(r, 1).value = '#';
+    ws.getCell(r, 2).value = 'Equipo';
+    styleSubHeader(ws.getCell(r, 1));
+    styleSubHeader(ws.getCell(r, 2));
+    r += 1;
+
+    for (let i = 1; i <= count; i++) {
+      ws.getCell(r, 1).value = i;
+      ws.getCell(r, 1).alignment = { horizontal: 'center' };
+      styleInput(ws.getCell(r, 2));
+      r += 1;
+    }
+    r += 1; // espacio
+  }
+}
+
+// =========================================================
+// Hoja 5: TOP_GOLEADOR
+// =========================================================
+{
+  const ws = wb.addWorksheet('TOP_GOLEADOR');
+  ws.columns = [{ width: 22 }, { width: 32 }];
+
+  ws.mergeCells('A1:B1');
+  styleHeader(ws.getCell('A1'));
+  ws.getCell('A1').value = 'POSICIONES FINALES + GOLEADOR';
+  ws.getCell('A1').font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 14 };
+  ws.getRow(1).height = 28;
+
+  let r = 3;
+  ws.getCell(r, 1).value = 'POSICIONES FINALES DEL MUNDIAL';
+  ws.getCell(r, 1).font = { bold: true, size: 12 };
+  r += 1;
+
+  const positions: Array<[string, number]> = [
+    ['1° (Campeón)', 90],
+    ['2° (Subcampeón)', 60],
+    ['3°', 40],
+    ['4°', 28],
+  ];
+  for (const [label, pts] of positions) {
+    ws.getCell(r, 1).value = `${label}  (${pts} pts)`;
+    ws.getCell(r, 1).font = { bold: true };
+    styleInput(ws.getCell(r, 2));
+    r += 1;
+  }
+
+  r += 1;
+  ws.getCell(r, 1).value = 'GOLEADOR DEL MUNDIAL';
+  ws.getCell(r, 1).font = { bold: true, size: 12 };
+  r += 1;
+  ws.getCell(r, 1).value = 'Jugador  (50 pts)';
+  ws.getCell(r, 1).font = { bold: true };
+  styleInput(ws.getCell(r, 2));
+}
+
+// Escribir el archivo
+async function write() {
+  fs.mkdirSync(path.dirname(OUT_XLSX), { recursive: true });
+  await wb.xlsx.writeFile(OUT_XLSX);
+  console.log(`✔  Excel escrito en ${path.relative(ROOT, OUT_XLSX)}`);
+  console.log('\n✅ Listo.');
+}
+write();
