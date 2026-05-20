@@ -1,4 +1,5 @@
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { TOTAL_MAX_POINTS } from '@/lib/scoring/rules';
 import { RealtimeRefresher } from './RealtimeRefresher';
 import type { Team } from '@/lib/types';
@@ -17,11 +18,17 @@ export default async function RankingPage() {
   const supabase = await getSupabaseServerClient();
   const { data: { user: me } } = await supabase.auth.getUser();
 
+  // Usa service_role para campeón/goleador (atraviesa tablas de todos los usuarios).
+  // Sigue respetando la regla "no cuenta hasta guardar" filtrando por bracket_locked_at.
+  const admin = getSupabaseAdminClient();
+
   const [
     { data: scoreRows },
     { data: teams },
-    { data: topPositions },
+    { data: profiles },
     { data: scorers },
+    { data: bracketWinners },
+    { data: finalMatch },
   ] = await Promise.all([
     supabase
       .from('user_scores')
@@ -32,9 +39,17 @@ export default async function RankingPage() {
       `)
       .order('total', { ascending: false }),
     supabase.from('teams').select('*'),
-    supabase.from('predictions_top_positions').select('user_id, position, team_id'),
-    supabase.from('predictions_top_scorer').select('user_id, player_name'),
+    admin.from('profiles').select('id, bracket_locked_at'),
+    admin.from('predictions_top_scorer').select('user_id, player_name'),
+    admin.from('predictions_bracket_winners').select('user_id, match_id, winner_team_id'),
+    admin.from('matches').select('id').eq('external_code', 'FINAL-01').maybeSingle(),
   ]);
+
+  const lockedUserIds = new Set<string>();
+  for (const p of (profiles ?? []) as Array<{ id: string; bracket_locked_at: string | null }>) {
+    if (p.bracket_locked_at) lockedUserIds.add(p.id);
+  }
+  const finalMatchId = (finalMatch as { id?: number } | null)?.id ?? null;
 
   const rows: ScoreRow[] = (scoreRows ?? []).map((r) => ({
     user_id: r.user_id as string,
@@ -50,13 +65,20 @@ export default async function RankingPage() {
   const teamById = new Map<number, Team>();
   for (const t of (teams ?? []) as Team[]) teamById.set(t.id, t);
 
+  // Campeón derivado del pick del usuario en la Final (M104) — solo si confirmó bracket.
   const championByUser = new Map<string, number>();
-  for (const r of (topPositions ?? []) as Array<{ user_id: string; position: number; team_id: number }>) {
-    if (r.position === 1) championByUser.set(r.user_id, r.team_id);
+  if (finalMatchId != null) {
+    for (const r of (bracketWinners ?? []) as Array<{ user_id: string; match_id: number; winner_team_id: number }>) {
+      if (r.match_id !== finalMatchId) continue;
+      if (!lockedUserIds.has(r.user_id)) continue;
+      championByUser.set(r.user_id, r.winner_team_id);
+    }
   }
 
+  // Goleador solo cuenta si el usuario confirmó el bracket.
   const scorerByUser = new Map<string, string>();
   for (const r of (scorers ?? []) as Array<{ user_id: string; player_name: string }>) {
+    if (!lockedUserIds.has(r.user_id)) continue;
     scorerByUser.set(r.user_id, r.player_name);
   }
 
