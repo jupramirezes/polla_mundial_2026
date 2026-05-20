@@ -19,7 +19,7 @@ interface PageProps {
   searchParams: Promise<{ etapa?: string; grupo?: string }>;
 }
 
-export default async function ChismePage({ searchParams }: PageProps) {
+export default async function ResumenPage({ searchParams }: PageProps) {
   const me = await getCurrentUser();
   if (!me) redirect('/login');
 
@@ -33,6 +33,7 @@ export default async function ChismePage({ searchParams }: PageProps) {
     { data: profiles },
     { data: groupPreds },
     { data: koPreds },
+    { data: bracketPicks },
   ] = await Promise.all([
     supabase.from('teams').select('*'),
     supabase.from('matches').select('*').eq('stage', stage).order('id'),
@@ -42,6 +43,9 @@ export default async function ChismePage({ searchParams }: PageProps) {
       : { data: [] },
     stage !== 'group'
       ? supabase.from('predictions_knockout_matches').select('user_id, match_id, home_score, away_score, locked_at').not('locked_at', 'is', null)
+      : { data: [] },
+    stage !== 'group'
+      ? supabase.from('predictions_bracket_winners').select('user_id, match_id, winner_team_id')
       : { data: [] },
   ]);
 
@@ -53,15 +57,21 @@ export default async function ChismePage({ searchParams }: PageProps) {
     profileById.set(p.id, { display_name: p.display_name });
   }
 
-  // Predicciones por matchId
-  const predsByMatch = new Map<number, Array<{ user_id: string; home: number; away: number }>>();
-  const rows = stage === 'group' ? (groupPreds ?? []) : (koPreds ?? []);
-  for (const r of rows as Array<{ user_id: string; match_id: number; home_score: number; away_score: number }>) {
-    if (!predsByMatch.has(r.match_id)) predsByMatch.set(r.match_id, []);
-    predsByMatch.get(r.match_id)!.push({ user_id: r.user_id, home: r.home_score, away: r.away_score });
+  // Marcadores predichos por matchId (grupos o KO)
+  const scoresByMatch = new Map<number, Array<{ user_id: string; home: number; away: number }>>();
+  const scoreRows = stage === 'group' ? (groupPreds ?? []) : (koPreds ?? []);
+  for (const r of scoreRows as Array<{ user_id: string; match_id: number; home_score: number; away_score: number }>) {
+    if (!scoresByMatch.has(r.match_id)) scoresByMatch.set(r.match_id, []);
+    scoresByMatch.get(r.match_id)!.push({ user_id: r.user_id, home: r.home_score, away: r.away_score });
   }
 
-  // Filtrar partidos del grupo si es fase de grupos
+  // Bracket winner picks por matchId (solo para KO)
+  const winnerPicksByMatch = new Map<number, Array<{ user_id: string; winner_team_id: number }>>();
+  for (const r of (bracketPicks ?? []) as Array<{ user_id: string; match_id: number; winner_team_id: number }>) {
+    if (!winnerPicksByMatch.has(r.match_id)) winnerPicksByMatch.set(r.match_id, []);
+    winnerPicksByMatch.get(r.match_id)!.push({ user_id: r.user_id, winner_team_id: r.winner_team_id });
+  }
+
   const filteredMatches = stage === 'group'
     ? (matches ?? []).filter((m) => (m as MatchRow).group_letter === grupo)
     : (matches ?? []);
@@ -81,7 +91,6 @@ export default async function ChismePage({ searchParams }: PageProps) {
           </Link>
         </div>
 
-        {/* Tabs etapas */}
         <div className="mt-6 flex flex-wrap gap-1 border-b border-slate-200">
           {STAGE_ORDER.map((s) => (
             <Link
@@ -98,7 +107,6 @@ export default async function ChismePage({ searchParams }: PageProps) {
           ))}
         </div>
 
-        {/* Si es grupos, sub-tabs por letra */}
         {stage === 'group' && (
           <div className="mt-3 flex flex-wrap gap-1">
             {'ABCDEFGHIJKL'.split('').map((letter) => (
@@ -129,7 +137,8 @@ export default async function ChismePage({ searchParams }: PageProps) {
               const match = m as MatchRow;
               const home = match.home_team_id ? teamById.get(match.home_team_id) : null;
               const away = match.away_team_id ? teamById.get(match.away_team_id) : null;
-              const preds = predsByMatch.get(match.id) ?? [];
+              const scores = scoresByMatch.get(match.id) ?? [];
+              const winnerPicks = winnerPicksByMatch.get(match.id) ?? [];
               const officialFilled = match.home_score != null && match.away_score != null;
               return (
                 <MatchPredictionsCard
@@ -137,10 +146,13 @@ export default async function ChismePage({ searchParams }: PageProps) {
                   match={match}
                   home={home}
                   away={away}
-                  predictions={preds}
+                  scores={scores}
+                  winnerPicks={winnerPicks}
                   profileById={profileById}
+                  teamById={teamById}
                   officialFilled={officialFilled}
                   myUserId={me.id}
+                  isKnockout={stage !== 'group'}
                 />
               );
             })
@@ -152,19 +164,39 @@ export default async function ChismePage({ searchParams }: PageProps) {
 }
 
 function MatchPredictionsCard({
-  match, home, away, predictions, profileById, officialFilled, myUserId,
+  match, home, away, scores, winnerPicks, profileById, teamById, officialFilled, myUserId, isKnockout,
 }: {
   match: MatchRow;
   home: Team | null | undefined;
   away: Team | null | undefined;
-  predictions: Array<{ user_id: string; home: number; away: number }>;
+  scores: Array<{ user_id: string; home: number; away: number }>;
+  winnerPicks: Array<{ user_id: string; winner_team_id: number }>;
   profileById: Map<string, { display_name: string }>;
+  teamById: Map<number, Team>;
   officialFilled: boolean;
   myUserId: string;
+  isKnockout: boolean;
 }) {
+  // Quién oficialmente ganó (para comparar)
+  let officialWinnerId: number | null = null;
+  if (officialFilled) {
+    if (match.home_score! > match.away_score!) officialWinnerId = match.home_team_id;
+    else if (match.away_score! > match.home_score!) officialWinnerId = match.away_team_id;
+    // empate: officialWinnerId stays null
+  }
+
+  // Combinar: cualquier usuario que tenga score O winner pick
+  const userIds = new Set<string>();
+  for (const s of scores) userIds.add(s.user_id);
+  for (const w of winnerPicks) userIds.add(w.user_id);
+  const scoreByUser = new Map(scores.map((s) => [s.user_id, s]));
+  const winnerByUser = new Map(winnerPicks.map((w) => [w.user_id, w.winner_team_id]));
+
+  const hasAnyPick = userIds.size > 0;
+
   return (
     <div className="rounded-lg border border-slate-200 bg-white">
-      <div className="border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+      <div className="border-b border-slate-100 px-4 py-3 flex items-center justify-between flex-wrap gap-2">
         <div className="font-semibold">
           {home ? <>{home.flag_emoji ?? ''} {home.name}</> : <span className="text-slate-400 italic">por definir</span>}
           <span className="mx-2 text-slate-400">vs</span>
@@ -179,40 +211,68 @@ function MatchPredictionsCard({
         )}
       </div>
 
-      {predictions.length === 0 ? (
+      {!hasAnyPick ? (
         <div className="px-4 py-3 text-sm text-slate-500">
           Nadie ha guardado predicción aún.
         </div>
       ) : (
         <ul className="divide-y divide-slate-100">
-          {predictions.map((p) => {
-            const profile = profileById.get(p.user_id);
-            const isMe = p.user_id === myUserId;
-            const correctWinner = officialFilled && (
-              (Math.sign(p.home - p.away) === Math.sign(match.home_score! - match.away_score!))
+          {Array.from(userIds).map((userId) => {
+            const profile = profileById.get(userId);
+            const isMe = userId === myUserId;
+            const score = scoreByUser.get(userId);
+            const winnerId = winnerByUser.get(userId);
+            const winnerTeam = winnerId ? teamById.get(winnerId) : null;
+
+            const correctWinner = officialFilled && score && (
+              (Math.sign(score.home - score.away) === Math.sign(match.home_score! - match.away_score!))
             );
-            const exactMatch = officialFilled && p.home === match.home_score && p.away === match.away_score;
+            const exactMatch = officialFilled && score && score.home === match.home_score && score.away === match.away_score;
+            const correctBracketPick = officialFilled && officialWinnerId && winnerId === officialWinnerId;
+
             return (
               <li
-                key={p.user_id}
-                className={`flex items-center justify-between px-4 py-2 text-sm ${
-                  isMe ? 'bg-amber-50/50' : ''
-                }`}
+                key={userId}
+                className={`px-4 py-2 text-sm ${isMe ? 'bg-amber-50/50' : ''}`}
               >
-                <span className="font-medium">
-                  {profile?.display_name ?? p.user_id.slice(0, 8)}
-                  {isMe && <span className="ml-2 rounded bg-amber-200 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">tú</span>}
-                </span>
-                <span className="font-mono font-bold flex items-center gap-2">
-                  {p.home} - {p.away}
-                  {officialFilled && (
-                    exactMatch
-                      ? <span className="text-xs text-emerald-700">✓ exacto (+5)</span>
-                      : correctWinner
-                        ? <span className="text-xs text-emerald-700">✓ ganador (+2)</span>
-                        : <span className="text-xs text-red-700">✗</span>
-                  )}
-                </span>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <span className="font-medium">
+                    {profile?.display_name ?? userId.slice(0, 8)}
+                    {isMe && <span className="ml-2 rounded bg-amber-200 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">tú</span>}
+                  </span>
+                  <div className="flex items-center gap-3 text-xs flex-wrap">
+                    {/* Pick de ganador (bracket) — solo en KO */}
+                    {isKnockout && winnerTeam && (
+                      <span className="flex items-center gap-1">
+                        <span className="text-slate-500">Ganador:</span>
+                        <span className="font-medium">{winnerTeam.flag_emoji ?? ''} {winnerTeam.name}</span>
+                        {officialFilled && officialWinnerId && (
+                          correctBracketPick
+                            ? <span className="text-emerald-700 font-bold">✓</span>
+                            : <span className="text-red-700">✗</span>
+                        )}
+                      </span>
+                    )}
+                    {/* Pick de marcador */}
+                    {score && (
+                      <span className="flex items-center gap-1">
+                        <span className="text-slate-500">Marcador:</span>
+                        <span className="font-mono font-bold">{score.home} - {score.away}</span>
+                        {officialFilled && (
+                          exactMatch
+                            ? <span className="text-emerald-700 font-bold">✓ exacto (+5)</span>
+                            : correctWinner
+                              ? <span className="text-emerald-700">✓ ganador (+2)</span>
+                              : <span className="text-red-700">✗</span>
+                        )}
+                      </span>
+                    )}
+                    {/* Si solo tiene winner pick pero no score */}
+                    {isKnockout && winnerTeam && !score && (
+                      <span className="text-slate-400 italic text-[10px]">(sin marcador predicho)</span>
+                    )}
+                  </div>
+                </div>
               </li>
             );
           })}
