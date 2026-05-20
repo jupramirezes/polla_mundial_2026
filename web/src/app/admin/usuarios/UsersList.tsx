@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
-import { setUserAdmin } from './actions';
+import { setUserAdmin, deleteUser } from './actions';
 
 interface User {
   id: string;
@@ -28,6 +28,21 @@ export function UsersList({ users, currentUserId }: { users: User[]; currentUser
     });
   }
 
+  function remove(u: User) {
+    if (!confirm(
+      `Vas a BORRAR completamente a "${u.display_name}" (${u.email}).\n\n` +
+      `Esto elimina su cuenta y TODOS sus pronósticos. No se puede deshacer.\n\n` +
+      `¿Continuar?`,
+    )) return;
+    setError(null);
+    setBusyId(u.id);
+    start(async () => {
+      const r = await deleteUser({ userId: u.id });
+      setBusyId(null);
+      if (r.error) setError(r.error);
+    });
+  }
+
   return (
     <div className="mt-6">
       {error && (
@@ -44,6 +59,7 @@ export function UsersList({ users, currentUserId }: { users: User[]; currentUser
               <th className="px-3 py-2 hidden sm:table-cell">Email</th>
               <th className="px-3 py-2 text-center">Admin</th>
               <th className="px-3 py-2 text-center">Predicciones</th>
+              <th className="px-3 py-2 text-center">Borrar</th>
             </tr>
           </thead>
           <tbody>
@@ -78,6 +94,19 @@ export function UsersList({ users, currentUserId }: { users: User[]; currentUser
                     >
                       Ver →
                     </Link>
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    {isMe ? (
+                      <span className="text-[10px] text-slate-400">—</span>
+                    ) : (
+                      <button
+                        onClick={() => remove(u)}
+                        disabled={isBusy || pending}
+                        className="rounded-md border border-red-200 bg-white px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        🗑️
+                      </button>
+                    )}
                   </td>
                 </tr>
               );
