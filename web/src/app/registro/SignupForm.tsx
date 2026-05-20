@@ -21,7 +21,7 @@ export function SignupForm() {
     setInfo(null);
 
     const supabase = getSupabaseBrowserClient();
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -35,11 +35,16 @@ export function SignupForm() {
       return;
     }
 
-    setInfo(
-      'Te enviamos un correo para confirmar tu cuenta. ' +
-      'Tras confirmar, vuelve y entra con email/contraseña.',
-    );
-    setTimeout(() => router.push('/login'), 2500);
+    // Con email confirmation OFF en Supabase, signUp devuelve sesión inmediata.
+    if (data.session) {
+      setInfo('✓ Cuenta creada. Entrando…');
+      router.refresh();
+      setTimeout(() => router.push('/pronosticos'), 600);
+    } else {
+      // Fallback por si en algún momento se reactiva el confirm email
+      setInfo('Cuenta creada. Iniciá sesión para entrar.');
+      setTimeout(() => router.push('/login'), 1500);
+    }
   }
 
   return (
