@@ -90,16 +90,11 @@ export default async function AdminHomePage() {
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-700 mb-2">
               Cierre del mundial
             </h2>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <AdminTile
-                href="/admin/clasificados"
-                title="③ Marcar clasificados oficiales"
-                desc="OPCIONAL — sirve como respaldo manual. El sistema infiere automáticamente quién clasificó a cada ronda a partir de ② (los equipos asignados a R32 son los clasificados a R32, etc.)."
-              />
+            <div className="grid grid-cols-1 gap-3">
               <AdminTile
                 href="/admin/top"
-                title="④ Top 4 + goleador final"
-                desc="EL DÍA DE LA FINAL. Asigna campeón / subcampeón / 3° / 4° y el goleador del mundial. Cierra los puntos finales (218 + 50 pts)."
+                title="③ Goleador oficial del mundial"
+                desc="EL DÍA DE LA FINAL. Asigna el goleador del mundial (50 pts). Campeón / sub / 3° / 4° se derivan automáticamente de los marcadores oficiales de la Final y el Tercer Puesto que ya cargaste en ①."
               />
             </div>
           </div>
@@ -108,16 +103,11 @@ export default async function AdminHomePage() {
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-700 mb-2">
               Gestión
             </h2>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3">
               <AdminTile
                 href="/admin/usuarios"
                 title="Usuarios y permisos"
-                desc="Lista de registrados. Promover/quitar admin (para tu amigo organizador). Pronto: editar predicciones de cualquier usuario."
-              />
-              <AdminTile
-                href="/admin/upload-excel"
-                title="Subir Excel de un participante"
-                desc="(En desarrollo) Para usuarios que prefieran llenar el Excel offline."
+                desc="Lista de registrados. Promover/quitar admin. Ver y editar predicciones de cualquier usuario. Borrar cuentas de prueba."
               />
             </div>
           </div>
