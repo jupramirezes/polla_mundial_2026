@@ -2,27 +2,25 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { autofillMyGroupPredictions } from '@/app/pronosticos/grupos/actions';
+import { autofillMyGroupPredictions, clearMyGroupPredictions } from '@/app/pronosticos/grupos/actions';
 import { autofillMyBracket, clearMyBracketPicks } from '@/app/pronosticos/clasificados/actions';
-import { autofillMyKnockoutPredictions } from '@/app/pronosticos/eliminatorias/actions';
+import { autofillMyKnockoutPredictions, clearMyKnockoutPredictions } from '@/app/pronosticos/eliminatorias/actions';
 
 /**
- * Herramientas de testing, SOLO visible para admin.
- * 🧪 BORRAR estas funciones (y este componente) antes de mandar a participantes.
+ * Herramientas de testing — visibles SOLO para admin.
+ * 🧪 BORRAR este componente y las acciones que llama antes de mandar a participantes.
  */
 export function AdminTestingBar() {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
 
-  function action(label: string, fn: () => Promise<{ ok?: boolean; error?: string; filled?: number; picks?: number }>) {
+  type Result = { ok?: boolean; error?: string; filled?: number; picks?: number };
+  function action(label: string, fn: () => Promise<Result>) {
     setMsg(null);
     start(async () => {
       const r = await fn();
-      if (r.error) {
-        setMsg('❌ ' + r.error);
-        return;
-      }
+      if (r.error) { setMsg('❌ ' + r.error); return; }
       const n = r.filled ?? r.picks;
       setMsg(`✓ ${label}${typeof n === 'number' ? ` (${n})` : ''}`);
       router.refresh();
@@ -30,59 +28,86 @@ export function AdminTestingBar() {
   }
 
   return (
-    <div className="rounded-lg border-2 border-dashed border-blue-300 bg-blue-50 p-3">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <strong className="text-blue-900 text-sm">🧪 Herramientas de testing (solo admin)</strong>
-          <p className="text-xs text-blue-800 mt-0.5">
-            Rellena automático tus pronósticos para probar el sistema. Se borran antes de mandar a participantes.
-          </p>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          <button
-            onClick={() => {
-              if (!confirm('Voy a llenar tus 72 pronósticos de fase de grupos con marcadores ALEATORIOS y los voy a GUARDAR (locked). Sobreescribe lo que tengas. ¿Seguro?')) return;
-              action('72 marcadores generados', autofillMyGroupPredictions);
-            }}
-            disabled={pending}
-            className="rounded bg-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50"
-          >
-            🎲 Llenar grupos
-          </button>
-          <button
-            onClick={() => {
-              if (!confirm('Voy a llenar tu bracket completo con picks aleatorios (32 partidos + goleador). Requiere que ya tengas los 72 marcadores de grupos. NO bloquea el bracket. ¿Seguro?')) return;
-              action('bracket completo generado', autofillMyBracket);
-            }}
-            disabled={pending}
-            className="rounded bg-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50"
-          >
-            🎲 Llenar bracket
-          </button>
-          <button
-            onClick={() => {
-              if (!confirm('Voy a llenar TUS pronósticos de marcadores de eliminatorias (R32→Final) con marcadores aleatorios. Requiere que ya estén asignados los cruces en /admin/eliminatorias. ¿Seguro?')) return;
-              action('marcadores KO generados', autofillMyKnockoutPredictions);
-            }}
-            disabled={pending}
-            className="rounded bg-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50"
-          >
-            🎲 Llenar KO
-          </button>
-          <button
-            onClick={() => {
-              if (!confirm('Voy a borrar TODOS tus picks de bracket + goleador + lock. ¿Seguro?')) return;
-              action('bracket borrado', clearMyBracketPicks);
-            }}
-            disabled={pending}
-            className="rounded border border-red-300 bg-white px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
-          >
-            Borrar bracket
-          </button>
-        </div>
+    <div className="rounded-lg border-2 border-dashed border-blue-300 bg-blue-50 p-3 space-y-3">
+      <div>
+        <strong className="text-blue-900 text-sm">🧪 Herramientas de testing (solo admin)</strong>
+        <p className="text-xs text-blue-800 mt-0.5">
+          Rellena/borra automático tus pronósticos para probar el sistema. Se borran antes de mandar a participantes.
+        </p>
       </div>
+
+      {/* Fila 1: Llenar */}
+      <div className="flex gap-2 flex-wrap">
+        <span className="text-xs font-semibold text-blue-900 self-center w-16">Llenar:</span>
+        <button
+          onClick={() => {
+            if (!confirm('Voy a llenar tus 72 marcadores de grupos con valores aleatorios + locked. ¿Seguro?')) return;
+            action('grupos generados', autofillMyGroupPredictions);
+          }}
+          disabled={pending}
+          className="rounded bg-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+        >
+          🎲 Grupos
+        </button>
+        <button
+          onClick={() => {
+            if (!confirm('Voy a llenar tu bracket completo (R32→Final + goleador) con picks aleatorios. Requiere grupos ya llenos. ¿Seguro?')) return;
+            action('bracket generado', autofillMyBracket);
+          }}
+          disabled={pending}
+          className="rounded bg-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+        >
+          🎲 Bracket
+        </button>
+        <button
+          onClick={() => {
+            if (!confirm('Voy a llenar tus marcadores de eliminatorias con valores aleatorios + locked. Requiere cruces ya asignados por admin. ¿Seguro?')) return;
+            action('marcadores KO generados', autofillMyKnockoutPredictions);
+          }}
+          disabled={pending}
+          className="rounded bg-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+        >
+          🎲 KO
+        </button>
+      </div>
+
+      {/* Fila 2: Borrar */}
+      <div className="flex gap-2 flex-wrap">
+        <span className="text-xs font-semibold text-red-900 self-center w-16">Borrar:</span>
+        <button
+          onClick={() => {
+            if (!confirm('Voy a borrar TODOS tus pronósticos de grupos. ¿Seguro?')) return;
+            action('grupos borrados', clearMyGroupPredictions);
+          }}
+          disabled={pending}
+          className="rounded border border-red-300 bg-white px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
+        >
+          Grupos
+        </button>
+        <button
+          onClick={() => {
+            if (!confirm('Voy a borrar TUS picks de bracket + goleador + el lock. ¿Seguro?')) return;
+            action('bracket borrado', clearMyBracketPicks);
+          }}
+          disabled={pending}
+          className="rounded border border-red-300 bg-white px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
+        >
+          Bracket
+        </button>
+        <button
+          onClick={() => {
+            if (!confirm('Voy a borrar TUS marcadores predichos de eliminatorias. ¿Seguro?')) return;
+            action('marcadores KO borrados', clearMyKnockoutPredictions);
+          }}
+          disabled={pending}
+          className="rounded border border-red-300 bg-white px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
+        >
+          KO
+        </button>
+      </div>
+
       {msg && (
-        <p className={`mt-2 text-xs font-semibold ${msg.startsWith('❌') ? 'text-red-700' : 'text-emerald-700'}`}>
+        <p className={`text-xs font-semibold ${msg.startsWith('❌') ? 'text-red-700' : 'text-emerald-700'}`}>
           {msg}
         </p>
       )}

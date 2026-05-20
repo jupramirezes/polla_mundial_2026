@@ -100,3 +100,14 @@ export async function autofillMyGroupPredictions() {
 
   return { ok: true, filled: rows.length };
 }
+
+/** Admin (testing): borra MIS pronósticos de fase de grupos. */
+export async function clearMyGroupPredictions() {
+  const me = await getCurrentUser();
+  if (!me) return { error: 'no autenticado' };
+  if (!me.isAdmin) return { error: 'solo admin (test)' };
+  const supa = getSupabaseAdminClient();
+  const { error } = await supa.from('predictions_matches').delete().eq('user_id', me.id);
+  if (error) return { error: error.message };
+  return { ok: true };
+}
