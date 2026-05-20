@@ -2,7 +2,6 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { getCurrentUser } from '@/lib/auth';
-import { AdminTestingBar } from '@/components/AdminTestingBar';
 
 export default async function PronosticosPage() {
   const me = await getCurrentUser();
@@ -78,12 +77,6 @@ export default async function PronosticosPage() {
           aunque cambies de pantalla). Cuando estés conforme, le das <strong>Guardar</strong> partido por partido.
           Una vez guardado queda bloqueado y solo el admin puede cambiarlo.
         </div>
-
-        {me.isAdmin && (
-          <div className="mt-3">
-            <AdminTestingBar />
-          </div>
-        )}
 
         <ul className="mt-6 grid gap-3">
           {sections.map((s) => (
