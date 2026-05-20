@@ -117,8 +117,12 @@ export function BracketView({
       )}
 
       {bracket.warnings.length > 0 && (
-        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          ⚠️ {bracket.warnings.join(' ')}
+        <div className="mb-4 rounded-lg border-2 border-amber-400 bg-amber-50 p-4 text-sm text-amber-900">
+          <div className="font-bold text-base">⚠️ Termina primero la fase de grupos</div>
+          <p className="mt-1">{bracket.warnings.join(' ')}</p>
+          <p className="mt-2 text-xs">
+            Los cruces grises de abajo aparecerán completos cuando guardes todos los marcadores de los grupos pendientes.
+          </p>
         </div>
       )}
 
@@ -166,8 +170,8 @@ export function BracketView({
               type="text"
               value={scorer}
               onChange={(e) => setScorer(e.target.value)}
-              onBlur={commitScorer}
               disabled={locked}
+              maxLength={80}
               placeholder="Nombre completo del jugador"
               className="flex-1 rounded border border-slate-300 bg-amber-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-60"
             />

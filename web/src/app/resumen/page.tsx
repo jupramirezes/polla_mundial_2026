@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import type { MatchRow, Team } from '@/lib/types';
 
 const STAGE_LABEL: Record<string, string> = {
@@ -26,7 +26,10 @@ export default async function ResumenPage({ searchParams }: PageProps) {
   const { etapa = 'group', grupo = 'A' } = await searchParams;
   const stage = STAGE_ORDER.includes(etapa) ? etapa : 'group';
 
-  const supabase = await getSupabaseServerClient();
+  // Usamos service_role porque /resumen muestra predicciones de TODOS los participantes,
+  // y la RLS de predictions_* restringe SELECT al propio user_id. Aquí filtramos manualmente
+  // por locked_at (grupos/KO) y por bracket_locked_at (bracket) para no exponer drafts.
+  const supabase = getSupabaseAdminClient();
   const [
     { data: teams },
     { data: matches },
@@ -37,7 +40,7 @@ export default async function ResumenPage({ searchParams }: PageProps) {
   ] = await Promise.all([
     supabase.from('teams').select('*'),
     supabase.from('matches').select('*').eq('stage', stage).order('id'),
-    supabase.from('profiles').select('id, display_name'),
+    supabase.from('profiles').select('id, display_name, bracket_locked_at'),
     stage === 'group'
       ? supabase.from('predictions_matches').select('user_id, match_id, home_score, away_score, locked_at').not('locked_at', 'is', null)
       : { data: [] },
@@ -48,6 +51,12 @@ export default async function ResumenPage({ searchParams }: PageProps) {
       ? supabase.from('predictions_bracket_winners').select('user_id, match_id, winner_team_id')
       : { data: [] },
   ]);
+
+  // Set de usuarios con bracket confirmado — solo estos exponen sus picks de ganador.
+  const bracketLockedUserIds = new Set<string>();
+  for (const p of (profiles ?? []) as Array<{ id: string; bracket_locked_at: string | null }>) {
+    if (p.bracket_locked_at) bracketLockedUserIds.add(p.id);
+  }
 
   const teamById = new Map<number, Team>();
   for (const t of (teams ?? []) as Team[]) teamById.set(t.id, t);
@@ -65,9 +74,10 @@ export default async function ResumenPage({ searchParams }: PageProps) {
     scoresByMatch.get(r.match_id)!.push({ user_id: r.user_id, home: r.home_score, away: r.away_score });
   }
 
-  // Bracket winner picks por matchId (solo para KO)
+  // Bracket winner picks por matchId (solo para KO). Filtra a usuarios con bracket confirmado.
   const winnerPicksByMatch = new Map<number, Array<{ user_id: string; winner_team_id: number }>>();
   for (const r of (bracketPicks ?? []) as Array<{ user_id: string; match_id: number; winner_team_id: number }>) {
+    if (!bracketLockedUserIds.has(r.user_id)) continue;
     if (!winnerPicksByMatch.has(r.match_id)) winnerPicksByMatch.set(r.match_id, []);
     winnerPicksByMatch.get(r.match_id)!.push({ user_id: r.user_id, winner_team_id: r.winner_team_id });
   }
@@ -260,9 +270,9 @@ function MatchPredictionsCard({
                         <span className="font-mono font-bold">{score.home} - {score.away}</span>
                         {officialFilled && (
                           exactMatch
-                            ? <span className="text-emerald-700 font-bold">✓ exacto (+5)</span>
+                            ? <span className="text-emerald-700 font-bold">✓ exacto · 5 pts</span>
                             : correctWinner
-                              ? <span className="text-emerald-700">✓ ganador (+2)</span>
+                              ? <span className="text-emerald-700">✓ ganador · 2 pts</span>
                               : <span className="text-red-700">✗</span>
                         )}
                       </span>

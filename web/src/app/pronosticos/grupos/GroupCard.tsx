@@ -128,7 +128,9 @@ export function GroupCard({
     const state = states.get(matchId);
     if (!state) return;
     if (state.lockedAt && !isAdmin) return;
-    const clean = raw.replace(/[^0-9]/g, '').slice(0, 2);
+    let clean = raw.replace(/[^0-9]/g, '').slice(0, 2);
+    // El server limita a 20 (Zod). Clamp en cliente para evitar errores feos.
+    if (clean !== '' && Number(clean) > 20) clean = '20';
     setStates((prev) => {
       const next = new Map(prev);
       const cur = next.get(matchId)!;
@@ -372,15 +374,17 @@ export function GroupCard({
             <div className="mt-5 flex justify-end gap-2">
               <button
                 onClick={() => setConfirm(null)}
-                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-100"
+                disabled={saving !== null}
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancelar
               </button>
               <button
                 onClick={confirmSave}
-                className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-800"
+                disabled={saving !== null}
+                className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-800 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Sí, guardar
+                {saving !== null ? 'Guardando...' : 'Sí, guardar'}
               </button>
             </div>
           </div>

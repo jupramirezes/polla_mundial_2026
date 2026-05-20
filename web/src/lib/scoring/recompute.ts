@@ -128,12 +128,21 @@ export async function recomputeAllUserScores(): Promise<{ ok: true; users: numbe
 
   const { data: profiles, error: eProf } = await supa
     .from('profiles')
-    .select('id');
+    .select('id, bracket_locked_at');
   if (eProf) return { ok: false, error: eProf.message };
 
   const userIds = (profiles ?? []).map((p) => (p as { id: string }).id);
 
-  // Cargas batch
+  // Set de usuarios que confirmaron su bracket (lock global). Solo estos
+  // suman puntos de bracket / goleador. Regla "no cuenta hasta guardar".
+  const bracketLockedUsers = new Set<string>();
+  for (const p of (profiles ?? []) as Array<{ id: string; bracket_locked_at: string | null }>) {
+    if (p.bracket_locked_at) bracketLockedUsers.add(p.id);
+  }
+
+  // Cargas batch.
+  // - Grupos y KO: filtramos por locked_at IS NOT NULL (regla "no cuenta hasta guardar")
+  // - Bracket winners y goleador: cargamos todo, filtramos por bracketLockedUsers más abajo
   const [
     { data: predMatches },
     { data: predKO },
@@ -142,8 +151,12 @@ export async function recomputeAllUserScores(): Promise<{ ok: true; users: numbe
     { data: predScorer },
     { data: predBracketWinners },
   ] = await Promise.all([
-    supa.from('predictions_matches').select('user_id, match_id, home_score, away_score'),
-    supa.from('predictions_knockout_matches').select('user_id, match_id, home_score, away_score'),
+    supa.from('predictions_matches')
+      .select('user_id, match_id, home_score, away_score')
+      .not('locked_at', 'is', null),
+    supa.from('predictions_knockout_matches')
+      .select('user_id, match_id, home_score, away_score')
+      .not('locked_at', 'is', null),
     supa.from('predictions_qualifiers').select('user_id, round, team_id'),
     supa.from('predictions_top_positions').select('user_id, position, team_id'),
     supa.from('predictions_top_scorer').select('user_id, player_name'),
@@ -273,6 +286,8 @@ export async function recomputeAllUserScores(): Promise<{ ok: true; users: numbe
 
   const bracketPicksByUser = new Map<string, Map<number, number>>();
   for (const r of (predBracketWinners ?? []) as Array<{ user_id: string; match_id: number; winner_team_id: number }>) {
+    // Regla "no cuenta hasta guardar": solo computa si el usuario confirmó su bracket completo.
+    if (!bracketLockedUsers.has(r.user_id)) continue;
     const num = numByMatchId.get(r.match_id);
     if (num == null) continue;
     if (!bracketPicksByUser.has(r.user_id)) bracketPicksByUser.set(r.user_id, new Map());
@@ -343,6 +358,8 @@ export async function recomputeAllUserScores(): Promise<{ ok: true; users: numbe
     }
   }
   for (const r of (predScorer ?? []) as Array<{ user_id: string; player_name: string }>) {
+    // Regla "no cuenta hasta guardar": el goleador solo cuenta si el usuario confirmó el bracket.
+    if (!bracketLockedUsers.has(r.user_id)) continue;
     ensure(r.user_id).topScorer = r.player_name;
   }
 

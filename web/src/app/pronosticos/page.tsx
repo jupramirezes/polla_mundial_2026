@@ -12,27 +12,23 @@ export default async function PronosticosPage() {
 
   const [
     { count: matchesFilled },
-    { count: r16Picks },
-    { count: qfPicks },
-    { count: sfPicks },
-    { count: finalPicks },
-    { count: topPositionsFilled },
+    { count: bracketWinnersFilled },
     { data: scorerRow },
     { count: koPredsFilled },
+    { data: profileRow },
   ] = await Promise.all([
     supabase.from('predictions_matches').select('match_id', { count: 'exact', head: true }).eq('user_id', user.id),
-    supabase.from('predictions_qualifiers').select('team_id', { count: 'exact', head: true }).eq('user_id', user.id).eq('round', 'r16'),
-    supabase.from('predictions_qualifiers').select('team_id', { count: 'exact', head: true }).eq('user_id', user.id).eq('round', 'qf'),
-    supabase.from('predictions_qualifiers').select('team_id', { count: 'exact', head: true }).eq('user_id', user.id).eq('round', 'sf'),
-    supabase.from('predictions_qualifiers').select('team_id', { count: 'exact', head: true }).eq('user_id', user.id).eq('round', 'final'),
-    supabase.from('predictions_top_positions').select('position', { count: 'exact', head: true }).eq('user_id', user.id),
+    supabase.from('predictions_bracket_winners').select('match_id', { count: 'exact', head: true }).eq('user_id', user.id),
     supabase.from('predictions_top_scorer').select('player_name').eq('user_id', user.id).maybeSingle(),
     supabase.from('predictions_knockout_matches').select('match_id', { count: 'exact', head: true }).eq('user_id', user.id),
+    supabase.from('profiles').select('bracket_locked_at').eq('id', user.id).maybeSingle(),
   ]);
 
   const hasScorer = !!(scorerRow as { player_name?: string } | null)?.player_name;
-  const bracketPicks = (r16Picks ?? 0) + (qfPicks ?? 0) + (sfPicks ?? 0) + (finalPicks ?? 0) + (topPositionsFilled ?? 0) + (hasScorer ? 1 : 0);
-  const bracketTotal = 16 + 8 + 4 + 2 + 4 + 1;  // = 35
+  // El bracket son 32 cruces (R32 + R16 + QF + SF + 3°P + Final) + 1 goleador = 33
+  const bracketPicks = (bracketWinnersFilled ?? 0) + (hasScorer ? 1 : 0);
+  const bracketTotal = 33;
+  const bracketLocked = !!(profileRow as { bracket_locked_at?: string | null } | null)?.bracket_locked_at;
 
   const sections = [
     {
@@ -50,8 +46,10 @@ export default async function PronosticosPage() {
       desc: 'R32 automático. Eliges octavos, cuartos, semis, final, campeón/sub/3°/4° y goleador.',
       pts: '520 pts',
       href: '/pronosticos/clasificados',
-      progress: `${bracketPicks} / ${bracketTotal} picks`,
-      done: bracketPicks >= bracketTotal,
+      progress: bracketLocked
+        ? '🔒 Confirmado'
+        : `${bracketPicks} / ${bracketTotal} picks`,
+      done: bracketLocked,
     },
     {
       key: 'ko',

@@ -106,7 +106,8 @@ export function EliminatoriasPredictForm({
     const s = states.get(matchId);
     if (!s) return;
     if (s.lockedAt && !isAdmin) return;
-    const clean = raw.replace(/[^0-9]/g, '').slice(0, 2);
+    let clean = raw.replace(/[^0-9]/g, '').slice(0, 2);
+    if (clean !== '' && Number(clean) > 20) clean = '20';
     setStates((prev) => {
       const next = new Map(prev);
       const cur = next.get(matchId)!;
