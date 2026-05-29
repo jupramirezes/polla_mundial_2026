@@ -198,3 +198,38 @@ export async function adminUnlockBracket(userId: string) {
   return { ok: true };
 }
 
+/**
+ * Admin: confirma (bloquea) el bracket de un usuario EN SU NOMBRE.
+ * Valida exactamente lo mismo que el lock normal: grupos completos + 32 picks + goleador.
+ * Sirve para usuarios que ya llenaron todo pero no pulsaron "Confirmar".
+ */
+export async function adminLockBracket(userId: string) {
+  const me = await getCurrentUser();
+  if (!me) return { error: 'no autenticado' };
+  if (!me.isAdmin) return { error: 'no autorizado' };
+
+  const { groupsComplete } = await deriveCrucesForUser(userId);
+  if (!groupsComplete) {
+    return { error: 'El usuario no tiene los 72 marcadores de grupos completos.' };
+  }
+
+  const supa = getSupabaseAdminClient();
+  const { count } = await supa
+    .from('predictions_bracket_winners')
+    .select('match_id', { count: 'exact', head: true })
+    .eq('user_id', userId);
+  if ((count ?? 0) < 32) return { error: `El usuario tiene ${count ?? 0}/32 picks de bracket.` };
+
+  const { data: scorer } = await supa
+    .from('predictions_top_scorer').select('player_name').eq('user_id', userId).maybeSingle();
+  const name = (scorer as { player_name?: string } | null)?.player_name;
+  if (!name || name.trim() === '') return { error: 'El usuario no tiene goleador.' };
+
+  const { error } = await supa
+    .from('profiles')
+    .update({ bracket_locked_at: new Date().toISOString() })
+    .eq('id', userId);
+  if (error) return { error: error.message };
+  return { ok: true };
+}
+

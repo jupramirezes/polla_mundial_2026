@@ -86,19 +86,19 @@ export default async function PronosticosPage() {
         </div>
 
         {bracketNeedsConfirm && (
-          <div className="mt-3 rounded-lg border-2 border-amber-400 bg-amber-50 p-4">
-            <div className="font-bold text-amber-900">⚠️ ¡Te falta confirmar tu bracket!</div>
-            <p className="mt-1 text-sm text-amber-900">
-              Ya llenaste los 32 cruces y el goleador, pero <strong>todavía no los confirmaste</strong>.
+          <div className="mt-4 rounded-xl border-4 border-amber-500 bg-amber-50 p-5 shadow-lg">
+            <div className="text-2xl font-extrabold text-amber-900">⚠️ ¡FALTA CONFIRMAR TU BRACKET!</div>
+            <p className="mt-2 text-base font-semibold text-amber-900">
+              Ya llenaste los 32 cruces y el goleador, pero <u>todavía NO los confirmaste</u>.
               Tus picks de eliminatorias (campeón, subcampeón, 3°, 4°) y tu goleador
               <strong> NO cuentan para el ranking</strong> hasta que entres al bracket y pulses
               <strong> “Confirmar mi bracket”</strong>.
             </p>
             <Link
               href="/pronosticos/clasificados"
-              className="mt-3 inline-block rounded-lg bg-amber-600 px-4 py-2 text-sm font-bold text-white hover:bg-amber-700"
+              className="mt-4 inline-block rounded-lg bg-amber-600 px-6 py-3 text-lg font-extrabold text-white hover:bg-amber-700"
             >
-              Ir a confirmar mi bracket →
+              🔒 Ir a confirmar mi bracket →
             </Link>
           </div>
         )}

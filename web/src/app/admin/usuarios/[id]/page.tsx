@@ -5,9 +5,10 @@ import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import type { Team, MatchRow } from '@/lib/types';
 import {
   deriveUserBracket, crucesByStage,
-  type UserGroupMatchPred, type ResolvedSlot,
+  type UserGroupMatchPred, type ResolvedSlot, type DerivedCruce,
 } from '@/lib/bracket/derive';
 import { UnlockBracketButton } from './UnlockBracketButton';
+import { LockBracketButton } from './LockBracketButton';
 import { ScoresSection, ScorerEditor } from './UserPredictionsEditor';
 
 interface PageProps {
@@ -121,6 +122,18 @@ export default async function AdminUserPage({ params }: PageProps) {
   const crucesStageMap = crucesByStage(userBracket.cruces);
   const cruceByNum = new Map(userBracket.cruces.map((c) => [c.matchNum, c]));
 
+  // Un pick SOLO es válido si su cruce está resuelto desde los grupos guardados
+  // y el ganador elegido es uno de los dos equipos del cruce. Esto ignora picks
+  // "huérfanos" (sin grupos) para que no se muestren como reales.
+  function isValidPick(c: DerivedCruce | undefined): boolean {
+    if (!c) return false;
+    const a = c.teamA.kind === 'resolved' ? c.teamA.teamId : null;
+    const b = c.teamB.kind === 'resolved' ? c.teamB.teamId : null;
+    if (a == null || b == null) return false;
+    return c.userPickedWinnerTeamId === a || c.userPickedWinnerTeamId === b;
+  }
+  const validPicksCount = userBracket.cruces.filter(isValidPick).length;
+
   // Top 4 derivado del bracket REAL del usuario:
   //  Campeón   = ganador de la Final (M104)
   //  Subcampeón= el OTRO equipo de la Final (perdedor)
@@ -134,9 +147,11 @@ export default async function AdminUserPage({ params }: PageProps) {
     const b = c.teamB.kind === 'resolved' ? c.teamB.teamId : null;
     return a === winnerId ? b : a;
   }
-  const championId = picks.get(104) ?? null;
+  const finalCruce = cruceByNum.get(104);
+  const tpCruce = cruceByNum.get(103);
+  const championId = isValidPick(finalCruce) ? finalCruce!.userPickedWinnerTeamId : null;
   const subId = otherTeamInCruce(104, championId);
-  const thirdId = picks.get(103) ?? null;
+  const thirdId = isValidPick(tpCruce) ? tpCruce!.userPickedWinnerTeamId : null;
   const fourthId = otherTeamInCruce(103, thirdId);
 
   const profileData = profile as {
@@ -199,8 +214,14 @@ export default async function AdminUserPage({ params }: PageProps) {
             <strong>⚠️ Este usuario aún NO confirmó su bracket.</strong> Por la regla
             <em> &ldquo;no cuenta hasta guardar&rdquo;</em>, sus picks de eliminatorias (campeón,
             subcampeón, 3°, 4°) y su goleador <strong>todavía no suman puntos ni aparecen en el
-            ranking</strong> hasta que pulse &ldquo;Confirmar mi bracket&rdquo;. Sus marcadores de
-            grupos sí cuentan a medida que los guarda. (Picks de bracket guardados: {picks.size}/32.)
+            ranking</strong> hasta que se confirme. Sus marcadores de grupos sí cuentan a medida
+            que los guarda. (Picks de bracket válidos: {validPicksCount}/32.)
+            <div className="mt-2 flex items-center gap-2 flex-wrap">
+              <LockBracketButton userId={userId} />
+              <span className="text-[11px] text-amber-700">
+                Solo funciona si ya llenó todo (72 grupos + 32 picks + goleador). Úsalo para confirmar en su nombre.
+              </span>
+            </div>
           </div>
         )}
 
@@ -240,7 +261,7 @@ export default async function AdminUserPage({ params }: PageProps) {
             {(['r32', 'r16', 'qf', 'sf', 'tp', 'final'] as const).map((stage) => {
               const cruces = crucesStageMap.get(stage) ?? [];
               if (cruces.length === 0) return null;
-              const picked = cruces.filter((c) => c.userPickedWinnerTeamId).length;
+              const picked = cruces.filter(isValidPick).length;
               return (
                 <div key={stage} className="rounded-lg border border-slate-200 bg-white p-3">
                   <h3 className="text-sm font-semibold mb-2">
@@ -252,20 +273,19 @@ export default async function AdminUserPage({ params }: PageProps) {
                         const winnerId = c.userPickedWinnerTeamId;
                         const aPick = c.teamA.kind === 'resolved' && c.teamA.teamId === winnerId;
                         const bPick = c.teamB.kind === 'resolved' && c.teamB.teamId === winnerId;
-                        // Si el ganador no resolvió a ningún lado (slots pendientes), mostrarlo aparte
-                        const winnerTeam = winnerId ? teamById.get(winnerId) : null;
-                        const winnerShownInSides = aPick || bPick;
+                        const bothResolved = c.teamA.kind === 'resolved' && c.teamB.kind === 'resolved';
+                        const validPick = isValidPick(c);
                         return (
                           <tr key={c.matchNum} className="border-t border-slate-100 first:border-0">
                             <td className="py-1 pr-2 text-right whitespace-nowrap">{renderSide(c.teamA, aPick)}</td>
                             <td className="py-1 px-1 text-center text-slate-400">vs</td>
                             <td className="py-1 pl-2 whitespace-nowrap">{renderSide(c.teamB, bPick)}</td>
                             <td className="py-1 pl-3 text-right whitespace-nowrap">
-                              {winnerTeam
-                                ? (winnerShownInSides
+                              {bothResolved
+                                ? (validPick
                                     ? <span className="text-emerald-700 font-semibold">✓ pasa</span>
-                                    : <span className="text-emerald-700 font-semibold">✓ {winnerTeam.flag_emoji ?? ''} {winnerTeam.name}</span>)
-                                : <span className="text-slate-400">sin pick</span>}
+                                    : <span className="text-slate-400">sin pick</span>)
+                                : <span className="text-slate-400">—</span>}
                             </td>
                           </tr>
                         );

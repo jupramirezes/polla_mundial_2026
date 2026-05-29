@@ -21,6 +21,19 @@ type Banner = { kind: 'success' | 'error' | 'info'; text: string } | null;
 
 const STAGE_ORDER: Array<keyof typeof STAGE_LABEL> = ['r32', 'r16', 'qf', 'sf', 'tp', 'final'];
 
+/**
+ * Un pick SOLO cuenta si el cruce está realmente resuelto (ambos equipos salen de
+ * los grupos guardados + rondas previas) y el ganador elegido es uno de esos dos.
+ * Esto evita contar picks "huérfanos" creados antes de exigir la fase de grupos
+ * (p.ej. usuarios con 32 picks pero 0 grupos: ahora ven 0/32, no 32/32).
+ */
+function isValidPick(c: DerivedCruce): boolean {
+  const a = c.teamA.kind === 'resolved' ? c.teamA.teamId : null;
+  const b = c.teamB.kind === 'resolved' ? c.teamB.teamId : null;
+  if (a == null || b == null) return false;
+  return c.userPickedWinnerTeamId === a || c.userPickedWinnerTeamId === b;
+}
+
 export function BracketView({
   bracket, teams, initialScorer, bracketLockedAt, isAdmin,
 }: Props) {
@@ -39,8 +52,8 @@ export function BracketView({
   const [confirmingLock, setConfirmingLock] = useState(false);
   const [lockingNow, setLockingNow] = useState(false);
 
-  // Cuántos picks tiene el usuario
-  const totalPicks = bracket.cruces.filter((c) => c.userPickedWinnerTeamId != null).length;
+  // Cuántos picks VÁLIDOS tiene el usuario (cruce resuelto + ganador en el cruce).
+  const totalPicks = bracket.cruces.filter(isValidPick).length;
   const totalCruces = bracket.cruces.length;  // 32
   const allPicksDone = totalPicks === totalCruces;
   const scorerDone = scorer.trim() !== '';
@@ -113,6 +126,28 @@ export function BracketView({
                                        'border-blue-200 bg-blue-50 text-blue-900'
         }`}>
           {banner.text}
+        </div>
+      )}
+
+      {/* AVISO GIGANTE: lo llenó todo pero NO ha confirmado → no cuenta aún. */}
+      {!locked && canConfirm && (
+        <div className="mb-6 rounded-xl border-4 border-amber-500 bg-amber-50 p-5 shadow-lg">
+          <div className="text-2xl font-extrabold text-amber-900">
+            ⚠️ ¡FALTA CONFIRMAR TU BRACKET!
+          </div>
+          <p className="mt-2 text-base font-semibold text-amber-900">
+            Ya llenaste los 32 cruces y el goleador, pero <u>todavía NO se guardó</u>.
+            Tus picks de campeón, subcampeón, 3°, 4° y goleador
+            <strong> NO cuentan para el ranking</strong> hasta que pulses
+            <strong> “Confirmar mi bracket”</strong> aquí abajo.
+          </p>
+          <button
+            onClick={() => setConfirmingLock(true)}
+            disabled={lockingNow}
+            className="mt-4 w-full rounded-lg bg-amber-600 px-5 py-3 text-lg font-extrabold text-white hover:bg-amber-700 disabled:opacity-50 sm:w-auto"
+          >
+            🔒 Confirmar mi bracket ahora
+          </button>
         </div>
       )}
 
