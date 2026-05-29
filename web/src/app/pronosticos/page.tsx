@@ -29,6 +29,9 @@ export default async function PronosticosPage() {
   const bracketPicks = (bracketWinnersFilled ?? 0) + (hasScorer ? 1 : 0);
   const bracketTotal = 33;
   const bracketLocked = !!(profileRow as { bracket_locked_at?: string | null } | null)?.bracket_locked_at;
+  // Llenó los 32 cruces + goleador pero todavía NO confirmó → sus picks no cuentan aún.
+  const bracketComplete = (bracketWinnersFilled ?? 0) >= 32 && hasScorer;
+  const bracketNeedsConfirm = !bracketLocked && bracketComplete;
 
   const sections = [
     {
@@ -39,6 +42,7 @@ export default async function PronosticosPage() {
       href: '/pronosticos/grupos',
       progress: `${matchesFilled ?? 0} / 72 marcadores`,
       done: (matchesFilled ?? 0) >= 72,
+      warn: false,
     },
     {
       key: 'bracket',
@@ -48,8 +52,11 @@ export default async function PronosticosPage() {
       href: '/pronosticos/clasificados',
       progress: bracketLocked
         ? '🔒 Confirmado'
-        : `${bracketPicks} / ${bracketTotal} picks`,
+        : bracketNeedsConfirm
+          ? '⚠️ 33/33 — falta CONFIRMAR'
+          : `${bracketPicks} / ${bracketTotal} picks`,
       done: bracketLocked,
+      warn: bracketNeedsConfirm,
     },
     {
       key: 'ko',
@@ -59,6 +66,7 @@ export default async function PronosticosPage() {
       href: '/pronosticos/eliminatorias',
       progress: `${koPredsFilled ?? 0} marcadores predichos`,
       done: false,
+      warn: false,
     },
   ];
 
@@ -73,8 +81,27 @@ export default async function PronosticosPage() {
         <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
           💡 <strong>Tip:</strong> primero llena todo (lo que vayas escribiendo se guarda en tu navegador
           aunque cambies de pantalla). Cuando estés conforme, le das <strong>Guardar</strong> partido por partido.
-          Una vez guardado queda bloqueado y solo el admin puede cambiarlo.
+          Una vez guardado queda bloqueado y solo el admin puede cambiarlo. El <strong>bracket</strong> además
+          necesita un paso final: pulsar <strong>“Confirmar mi bracket”</strong> al terminar.
         </div>
+
+        {bracketNeedsConfirm && (
+          <div className="mt-3 rounded-lg border-2 border-amber-400 bg-amber-50 p-4">
+            <div className="font-bold text-amber-900">⚠️ ¡Te falta confirmar tu bracket!</div>
+            <p className="mt-1 text-sm text-amber-900">
+              Ya llenaste los 32 cruces y el goleador, pero <strong>todavía no los confirmaste</strong>.
+              Tus picks de eliminatorias (campeón, subcampeón, 3°, 4°) y tu goleador
+              <strong> NO cuentan para el ranking</strong> hasta que entres al bracket y pulses
+              <strong> “Confirmar mi bracket”</strong>.
+            </p>
+            <Link
+              href="/pronosticos/clasificados"
+              className="mt-3 inline-block rounded-lg bg-amber-600 px-4 py-2 text-sm font-bold text-white hover:bg-amber-700"
+            >
+              Ir a confirmar mi bracket →
+            </Link>
+          </div>
+        )}
 
         <ul className="mt-6 grid gap-3">
           {sections.map((s) => (
@@ -86,18 +113,24 @@ export default async function PronosticosPage() {
                 </div>
                 <p className="mt-1 text-sm text-slate-600">{s.desc}</p>
                 <div className="mt-3 flex items-center justify-between gap-3">
-                  <div className="text-xs text-slate-500 font-mono">
-                    {s.done ? <span className="text-emerald-700 font-semibold">✓ {s.progress}</span> : s.progress}
+                  <div className="text-xs font-mono">
+                    {s.done
+                      ? <span className="text-emerald-700 font-semibold">✓ {s.progress}</span>
+                      : s.warn
+                        ? <span className="text-amber-700 font-bold">{s.progress}</span>
+                        : <span className="text-slate-500">{s.progress}</span>}
                   </div>
                   <Link
                     href={s.href}
                     className={`shrink-0 rounded-md px-3 py-1.5 text-sm font-bold transition ${
                       s.done
                         ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                        : 'bg-emerald-700 text-white hover:bg-emerald-800'
+                        : s.warn
+                          ? 'bg-amber-600 text-white hover:bg-amber-700'
+                          : 'bg-emerald-700 text-white hover:bg-emerald-800'
                     }`}
                   >
-                    {s.done ? 'Revisar / editar' : 'Iniciar pronóstico →'}
+                    {s.done ? 'Revisar / editar' : s.warn ? '🔒 Confirmar ahora →' : 'Iniciar pronóstico →'}
                   </Link>
                 </div>
               </div>

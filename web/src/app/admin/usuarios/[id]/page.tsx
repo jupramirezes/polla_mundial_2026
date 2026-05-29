@@ -3,6 +3,10 @@ import Link from 'next/link';
 import { getCurrentUser } from '@/lib/auth';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import type { Team, MatchRow } from '@/lib/types';
+import {
+  deriveUserBracket, crucesByStage,
+  type UserGroupMatchPred, type ResolvedSlot,
+} from '@/lib/bracket/derive';
 import { UnlockBracketButton } from './UnlockBracketButton';
 import { ScoresSection, ScorerEditor } from './UserPredictionsEditor';
 
@@ -14,6 +18,21 @@ const STAGE_LABEL: Record<string, string> = {
   r32: 'Dieciseisavos', r16: 'Octavos', qf: 'Cuartos',
   sf: 'Semifinales', tp: 'Tercer puesto', final: 'Final',
 };
+
+// external_code (R32-01 … FINAL-01) → matchNum lógico 73-104
+function matchNumFromExternalCode(code: string | null | undefined): number | null {
+  if (!code) return null;
+  const mm = code.match(/^(R32|R16|QF|SF|TP|FINAL)-(\d{2})$/);
+  if (!mm) return null;
+  const stage = mm[1], idx = parseInt(mm[2], 10);
+  if (stage === 'R32') return 72 + idx;
+  if (stage === 'R16') return 88 + idx;
+  if (stage === 'QF')  return 96 + idx;
+  if (stage === 'SF')  return 100 + idx;
+  if (stage === 'TP')  return 103;
+  if (stage === 'FINAL') return 104;
+  return null;
+}
 
 export default async function AdminUserPage({ params }: PageProps) {
   const me = await getCurrentUser();
@@ -63,59 +82,62 @@ export default async function AdminUserPage({ params }: PageProps) {
     koPredsMap.set(r.match_id, { home: r.home_score, away: r.away_score, locked_at: r.locked_at });
   }
 
-  // Picks del bracket por matchId → ganador predicho
-  const bracketByMatchId = new Map<number, number>();
+  // ============================================================
+  // Bracket del usuario — derivado igual que el motor de scoring
+  // (deriveUserBracket), para que el admin vea EXACTAMENTE los cruces
+  // que el usuario pickeó, ronda por ronda, no sólo "quién pasa".
+  // ============================================================
+
+  // teams por grupo + lista de grupos
+  const teamsByGroup = new Map<string, number[]>();
+  for (const t of (teams ?? []) as Team[]) {
+    if (!teamsByGroup.has(t.group_letter)) teamsByGroup.set(t.group_letter, []);
+    teamsByGroup.get(t.group_letter)!.push(t.id);
+  }
+  const groupLetters = Array.from(teamsByGroup.keys()).sort();
+
+  // picks del usuario: matchNum (73-104) → team_id ganador
+  const picks = new Map<number, number>();
   for (const r of (predBracketWinners ?? []) as Array<{ match_id: number; winner_team_id: number }>) {
-    bracketByMatchId.set(r.match_id, r.winner_team_id);
+    const m = matchById.get(r.match_id);
+    const num = matchNumFromExternalCode(m?.external_code);
+    if (num != null) picks.set(num, r.winner_team_id);
   }
 
-  // Para cada ronda, listar los equipos que el usuario hizo pasar (= ganadores
-  // de los partidos de esa ronda). external_code define la ronda.
-  // R32 (M73-M88) → 16 picks → Dieciseisavos (los ganadores pasan a R16/Octavos)
-  // R16 (M89-M96) → 8 picks → Octavos (los ganadores pasan a QF)
-  // QF (M97-M100) → 4 picks → Cuartos (los ganadores pasan a SF)
-  // SF (M101-M102) → 2 picks → Semis (los ganadores pasan a Final)
-  // TP (M103) → 1 pick → ganador 3°
-  // FINAL (M104) → 1 pick → campeón
-  const winnersByStage: Record<'r32' | 'r16' | 'qf' | 'sf' | 'tp' | 'final', number[]> = {
-    r32: [], r16: [], qf: [], sf: [], tp: [], final: [],
-  };
-  for (const m of matchById.values()) {
-    const stage = m.stage as keyof typeof winnersByStage | undefined;
-    if (!stage || !(stage in winnersByStage)) continue;
-    const winner = bracketByMatchId.get(m.id);
-    if (winner) winnersByStage[stage].push(winner);
+  // marcadores de grupo del usuario indexados por grupo (input para deriveUserBracket)
+  const matchPredsByGroup = new Map<string, UserGroupMatchPred[]>();
+  for (const [matchId, pred] of matchPredsMap) {
+    const m = matchById.get(matchId);
+    if (!m || m.stage !== 'group' || !m.group_letter || !m.home_team_id || !m.away_team_id) continue;
+    if (!matchPredsByGroup.has(m.group_letter)) matchPredsByGroup.set(m.group_letter, []);
+    matchPredsByGroup.get(m.group_letter)!.push({
+      matchId, groupLetter: m.group_letter,
+      homeTeamId: m.home_team_id, awayTeamId: m.away_team_id,
+      homeScore: pred.home, awayScore: pred.away,
+    });
   }
 
-  // Top 4 derivado:
-  //  Campeón = ganador de FINAL (M104)
-  //  Sub = perdedor de FINAL (el otro equipo del cruce)
-  //  3° = ganador de TP (M103)
-  //  4° = perdedor de TP
-  let championId: number | null = null;
-  let subId: number | null = null;
-  let thirdId: number | null = null;
-  let fourthId: number | null = null;
-  {
-    const finalMatch = Array.from(matchById.values()).find((m) => m.stage === 'final');
-    if (finalMatch) {
-      const winner = bracketByMatchId.get(finalMatch.id) ?? null;
-      championId = winner;
-      if (winner) {
-        if (finalMatch.home_team_id && finalMatch.home_team_id !== winner) subId = finalMatch.home_team_id;
-        else if (finalMatch.away_team_id && finalMatch.away_team_id !== winner) subId = finalMatch.away_team_id;
-      }
-    }
-    const tpMatch = Array.from(matchById.values()).find((m) => m.stage === 'tp');
-    if (tpMatch) {
-      const winner = bracketByMatchId.get(tpMatch.id) ?? null;
-      thirdId = winner;
-      if (winner) {
-        if (tpMatch.home_team_id && tpMatch.home_team_id !== winner) fourthId = tpMatch.home_team_id;
-        else if (tpMatch.away_team_id && tpMatch.away_team_id !== winner) fourthId = tpMatch.away_team_id;
-      }
-    }
+  const userBracket = deriveUserBracket(groupLetters, teamsByGroup, matchPredsByGroup, picks);
+  const crucesStageMap = crucesByStage(userBracket.cruces);
+  const cruceByNum = new Map(userBracket.cruces.map((c) => [c.matchNum, c]));
+
+  // Top 4 derivado del bracket REAL del usuario:
+  //  Campeón   = ganador de la Final (M104)
+  //  Subcampeón= el OTRO equipo de la Final (perdedor)
+  //  3°        = ganador del Tercer Puesto (M103)
+  //  4°        = el OTRO equipo del Tercer Puesto (perdedor)
+  function otherTeamInCruce(matchNum: number, winnerId: number | null): number | null {
+    if (!winnerId) return null;
+    const c = cruceByNum.get(matchNum);
+    if (!c) return null;
+    const a = c.teamA.kind === 'resolved' ? c.teamA.teamId : null;
+    const b = c.teamB.kind === 'resolved' ? c.teamB.teamId : null;
+    return a === winnerId ? b : a;
   }
+  const championId = picks.get(104) ?? null;
+  const subId = otherTeamInCruce(104, championId);
+  const thirdId = picks.get(103) ?? null;
+  const fourthId = otherTeamInCruce(103, thirdId);
 
   const profileData = profile as {
     display_name: string; email: string; phone: string | null;
@@ -123,6 +145,7 @@ export default async function AdminUserPage({ params }: PageProps) {
   };
   const totalPoints = (scoreRow as { total?: number } | null)?.total ?? 0;
   const scorerName = (predScorer as { player_name?: string } | null)?.player_name ?? '';
+  const bracketLocked = !!profileData.bracket_locked_at;
 
   // Listas de partidos por sección
   const groupMatches = Array.from(matchById.values()).filter((m) => m.stage === 'group');
@@ -132,6 +155,19 @@ export default async function AdminUserPage({ params }: PageProps) {
       const order = ['r32', 'r16', 'qf', 'sf', 'tp', 'final'];
       return order.indexOf(a.stage) - order.indexOf(b.stage);
     });
+
+  // helper render de un lado del cruce
+  const renderSide = (slot: ResolvedSlot, isPick: boolean) => {
+    if (slot.kind === 'resolved') {
+      const t = teamById.get(slot.teamId);
+      return (
+        <span className={isPick ? 'font-bold text-emerald-700' : 'text-slate-700'}>
+          {t?.flag_emoji ?? ''} {t?.name ?? `#${slot.teamId}`}
+        </span>
+      );
+    }
+    return <span className="text-slate-400 italic">por definir</span>;
+  };
 
   return (
     <main className="flex-1 px-4 py-6">
@@ -143,11 +179,9 @@ export default async function AdminUserPage({ params }: PageProps) {
             <div className="mt-2 flex items-center gap-2 text-xs flex-wrap">
               <span className="font-mono">Puntos: <strong className="text-emerald-700">{totalPoints}</strong></span>
               {profileData.is_admin && <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-900">admin</span>}
-              {profileData.bracket_locked_at && (
-                <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-semibold text-emerald-800">
-                  🔒 bracket confirmado
-                </span>
-              )}
+              {bracketLocked
+                ? <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-semibold text-emerald-800">🔒 bracket confirmado</span>
+                : <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-900">⚠️ bracket sin confirmar</span>}
             </div>
           </div>
           <Link href="/admin/usuarios" className="text-sm text-emerald-700 hover:underline">
@@ -160,11 +194,21 @@ export default async function AdminUserPage({ params }: PageProps) {
           Los cambios cuentan inmediatamente para el ranking (locked).
         </div>
 
-        {profileData.bracket_locked_at && (
+        {!bracketLocked && (
+          <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+            <strong>⚠️ Este usuario aún NO confirmó su bracket.</strong> Por la regla
+            <em> &ldquo;no cuenta hasta guardar&rdquo;</em>, sus picks de eliminatorias (campeón,
+            subcampeón, 3°, 4°) y su goleador <strong>todavía no suman puntos ni aparecen en el
+            ranking</strong> hasta que pulse &ldquo;Confirmar mi bracket&rdquo;. Sus marcadores de
+            grupos sí cuentan a medida que los guarda. (Picks de bracket guardados: {picks.size}/32.)
+          </div>
+        )}
+
+        {bracketLocked && (
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 flex items-center justify-between gap-3">
             <div className="text-sm text-amber-900">
               El usuario confirmó su bracket el{' '}
-              {new Date(profileData.bracket_locked_at).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}.
+              {new Date(profileData.bracket_locked_at!).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}.
               Si necesita editar bracket, desbloquéalo.
             </div>
             <UnlockBracketButton userId={userId} />
@@ -182,25 +226,52 @@ export default async function AdminUserPage({ params }: PageProps) {
         />
 
         <section className="mt-8">
-          <h2 className="text-lg font-bold">Bracket de eliminatorias</h2>
+          <h2 className="text-lg font-bold">Bracket de eliminatorias — cruces del usuario</h2>
           <p className="text-xs text-slate-500 mb-2">
-            Equipos que el usuario hizo pasar a cada ronda (derivado de sus picks de ganador).
+            Cada cruce que el usuario pickeó, ronda por ronda. El equipo <span className="font-bold text-emerald-700">resaltado</span> es
+            su ganador elegido. Los cruces se derivan de sus marcadores de grupos + sus picks de ganador.
           </p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {(['r32', 'r16', 'qf', 'sf', 'final'] as const).map((round) => {
-              const ids = winnersByStage[round];
+          {userBracket.warnings.length > 0 && (
+            <div className="mb-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+              {userBracket.warnings.map((w, i) => <div key={i}>· {w}</div>)}
+            </div>
+          )}
+          <div className="space-y-3">
+            {(['r32', 'r16', 'qf', 'sf', 'tp', 'final'] as const).map((stage) => {
+              const cruces = crucesStageMap.get(stage) ?? [];
+              if (cruces.length === 0) return null;
+              const picked = cruces.filter((c) => c.userPickedWinnerTeamId).length;
               return (
-                <div key={round} className="rounded-lg border border-slate-200 bg-white p-3">
+                <div key={stage} className="rounded-lg border border-slate-200 bg-white p-3">
                   <h3 className="text-sm font-semibold mb-2">
-                    {STAGE_LABEL[round]} <span className="text-slate-400">({ids.length})</span>
+                    {STAGE_LABEL[stage]} <span className="text-slate-400">({picked}/{cruces.length} pickeados)</span>
                   </h3>
-                  <ul className="text-xs space-y-1">
-                    {ids.map((id) => {
-                      const t = teamById.get(id);
-                      return <li key={id}>{t?.flag_emoji ?? ''} {t?.name}</li>;
-                    })}
-                    {ids.length === 0 && <li className="text-slate-400 italic">vacío</li>}
-                  </ul>
+                  <table className="w-full text-xs sm:text-sm">
+                    <tbody>
+                      {cruces.map((c) => {
+                        const winnerId = c.userPickedWinnerTeamId;
+                        const aPick = c.teamA.kind === 'resolved' && c.teamA.teamId === winnerId;
+                        const bPick = c.teamB.kind === 'resolved' && c.teamB.teamId === winnerId;
+                        // Si el ganador no resolvió a ningún lado (slots pendientes), mostrarlo aparte
+                        const winnerTeam = winnerId ? teamById.get(winnerId) : null;
+                        const winnerShownInSides = aPick || bPick;
+                        return (
+                          <tr key={c.matchNum} className="border-t border-slate-100 first:border-0">
+                            <td className="py-1 pr-2 text-right whitespace-nowrap">{renderSide(c.teamA, aPick)}</td>
+                            <td className="py-1 px-1 text-center text-slate-400">vs</td>
+                            <td className="py-1 pl-2 whitespace-nowrap">{renderSide(c.teamB, bPick)}</td>
+                            <td className="py-1 pl-3 text-right whitespace-nowrap">
+                              {winnerTeam
+                                ? (winnerShownInSides
+                                    ? <span className="text-emerald-700 font-semibold">✓ pasa</span>
+                                    : <span className="text-emerald-700 font-semibold">✓ {winnerTeam.flag_emoji ?? ''} {winnerTeam.name}</span>)
+                                : <span className="text-slate-400">sin pick</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               );
             })}
@@ -210,7 +281,8 @@ export default async function AdminUserPage({ params }: PageProps) {
         <section className="mt-8">
           <h2 className="text-lg font-bold">Top 4 + Goleador</h2>
           <p className="text-xs text-slate-500 mb-2">
-            Top 4 se deriva del bracket (campeón = ganador de la Final, etc.). El goleador es editable.
+            Top 4 derivado del bracket del usuario: campeón = ganador de su Final, subcampeón = el
+            otro finalista, 3° = ganador del Tercer Puesto, 4° = el otro. El goleador es editable.
           </p>
           <div className="rounded-lg border border-slate-200 bg-white p-3">
             <table className="w-full text-sm">
