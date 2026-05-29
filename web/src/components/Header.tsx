@@ -46,6 +46,12 @@ export async function Header() {
               Resumen
             </Link>
             <Link
+              href="/brackets"
+              className="hidden sm:inline text-sm font-medium text-white/90 hover:text-white hover:underline"
+            >
+              Brackets
+            </Link>
+            <Link
               href="/ranking"
               className="text-sm font-medium text-white/90 hover:text-white hover:underline"
             >

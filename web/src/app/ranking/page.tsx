@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { TOTAL_MAX_POINTS } from '@/lib/scoring/rules';
@@ -157,6 +158,16 @@ export default async function RankingPage() {
                         {totalHits}G · {totalExacts}E
                       </div>
                     </div>
+                  </div>
+
+                  {/* Ver el bracket completo de este participante */}
+                  <div className="mt-2 text-right">
+                    <Link
+                      href={`/brackets/${r.user_id}`}
+                      className="text-xs font-semibold text-emerald-700 hover:underline"
+                    >
+                      Ver bracket completo →
+                    </Link>
                   </div>
                 </li>
               );

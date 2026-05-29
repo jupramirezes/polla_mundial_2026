@@ -4,8 +4,7 @@
 import { computeGroupStandings, type StandingRow } from '@/lib/standings';
 import { lookupAnnexC, MATCH_FOR_WINNER_VS_THIRD } from './annex-c';
 import {
-  ALL_KNOCKOUT_MATCHES, R32_MATCHES, R16_MATCHES, QF_MATCHES, SF_MATCHES,
-  TP_MATCH, FINAL_MATCH,
+  ALL_KNOCKOUT_MATCHES,
   type KnockoutMatchSpec, type R32Slot, type AdvanceSlot,
 } from './structure';
 
@@ -166,13 +165,33 @@ export function deriveUserBracket(
   }
 
   // ---- 6. Construir lista de cruces ----
-  const cruces: DerivedCruce[] = ALL_KNOCKOUT_MATCHES.map((spec) => ({
-    matchNum: spec.matchNum,
-    stage: spec.stage,
-    teamA: resolveSlot(spec.teamA),
-    teamB: resolveSlot(spec.teamB),
-    userPickedWinnerTeamId: userPicks.get(spec.matchNum) ?? null,
-  }));
+  // IMPORTANTE: si la fase de grupos NO está completa, el bracket entero es
+  // indeterminable. Los slots de R16+ se resuelven a partir de los PICKS del
+  // usuario (ganador de Mxx), no de los grupos; así que con datos "huérfanos"
+  // (picks guardados sin haber llenado los grupos) las rondas avanzadas se
+  // "auto-resolverían" entre ellas y aparecerían como válidas aunque R32 esté
+  // pendiente. Para evitar eso, forzamos TODO a pendiente hasta que los 72
+  // marcadores de grupos estén guardados. Esto deja inertes los picks legacy
+  // sin grupos e impide crear nuevos (saveBracketWinner valida contra esto).
+  const groupsPendingSlot: ResolvedSlot = { kind: 'pending', reason: 'Completa la fase de grupos' };
+  const cruces: DerivedCruce[] = ALL_KNOCKOUT_MATCHES.map((spec) => {
+    if (!groupsComplete) {
+      return {
+        matchNum: spec.matchNum,
+        stage: spec.stage,
+        teamA: groupsPendingSlot,
+        teamB: groupsPendingSlot,
+        userPickedWinnerTeamId: userPicks.get(spec.matchNum) ?? null,
+      };
+    }
+    return {
+      matchNum: spec.matchNum,
+      stage: spec.stage,
+      teamA: resolveSlot(spec.teamA),
+      teamB: resolveSlot(spec.teamB),
+      userPickedWinnerTeamId: userPicks.get(spec.matchNum) ?? null,
+    };
+  });
 
   return { cruces, warnings, groupsComplete };
 }
