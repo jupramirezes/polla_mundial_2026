@@ -154,8 +154,9 @@ export default async function RankingPage() {
                     </div>
                     <div className="rounded bg-slate-50 px-2 py-1">
                       <div className="text-slate-500 uppercase tracking-wide text-[9px]">Aciertos</div>
-                      <div className="font-mono font-semibold">
-                        {totalHits}G · {totalExacts}E
+                      <div className="font-mono font-semibold text-[11px] leading-tight">
+                        <div>{totalHits} ganador</div>
+                        <div>{totalExacts} exactos</div>
                       </div>
                     </div>
                   </div>
@@ -176,8 +177,8 @@ export default async function RankingPage() {
         )}
 
         <p className="mt-4 text-xs text-slate-500">
-          <strong>G</strong> = ganador del partido acertado (2 pts c/u).
-          <strong> E</strong> = bonus marcador exacto (3 pts adicionales c/u).
+          <strong>Ganador</strong> = acertar quién gana el partido (2 pts c/u).
+          <strong> Exactos</strong> = bonus por marcador exacto (3 pts adicionales c/u).
           El ranking se actualiza solo cuando el admin guarda resultados oficiales.
         </p>
       </div>
