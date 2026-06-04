@@ -18,7 +18,7 @@ export async function saveTopScorer(name: string) {
   const me = await getCurrentUser();
   if (!me) return { error: 'no autenticado' };
   if (!me.isAdmin && await isBracketLocked(me.id)) {
-    return { error: 'Tu bracket ya está confirmado.' };
+    return { error: 'Tus cruces ya están confirmados.' };
   }
   const client = me.isAdmin ? getSupabaseAdminClient() : await getSupabaseServerClient();
   const cleaned = name.trim();

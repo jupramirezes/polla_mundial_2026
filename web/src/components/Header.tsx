@@ -49,7 +49,7 @@ export async function Header() {
               href="/brackets"
               className="hidden sm:inline text-sm font-medium text-white/90 hover:text-white hover:underline"
             >
-              Brackets
+              Cruces
             </Link>
             <Link
               href="/ranking"

@@ -167,7 +167,7 @@ export default async function RankingPage() {
                       href={`/brackets/${r.user_id}`}
                       className="text-xs font-semibold text-emerald-700 hover:underline"
                     >
-                      Ver bracket completo →
+                      Ver cruces completos →
                     </Link>
                   </div>
                 </li>

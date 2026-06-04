@@ -94,7 +94,7 @@ export default async function ClasificadosPage() {
       <div className="mx-auto max-w-5xl">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold">Bracket de eliminatorias</h1>
+            <h1 className="text-2xl font-bold">Cruces de eliminatorias</h1>
             <p className="mt-1 text-sm text-slate-600">
               Predice el ganador de cada enfrentamiento. Total en juego: <strong>520 pts</strong>.
             </p>

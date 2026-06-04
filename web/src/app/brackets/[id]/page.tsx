@@ -130,7 +130,7 @@ export default async function PublicBracketPage({ params }: PageProps) {
       <div className="mx-auto max-w-3xl">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <p className="text-xs text-slate-500">Bracket de</p>
+            <p className="text-xs text-slate-500">Cruces de</p>
             <h1 className="text-2xl font-bold">
               {targetName}
               {isMe && <span className="ml-2 rounded bg-amber-200 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">tú</span>}
@@ -138,7 +138,7 @@ export default async function PublicBracketPage({ params }: PageProps) {
             <p className="mt-1 text-xs font-mono text-slate-500">{totalByUser.get(userId) ?? 0} pts</p>
           </div>
           <Link href="/brackets" className="shrink-0 text-sm text-emerald-700 hover:underline">
-            ← Todos los brackets
+            ← Todos los cruces
           </Link>
         </div>
 
@@ -166,18 +166,18 @@ export default async function PublicBracketPage({ params }: PageProps) {
           <div className="mt-6 rounded-xl border border-slate-300 bg-slate-50 p-6 text-center">
             <div className="text-3xl">🔒</div>
             <p className="mt-2 font-semibold text-slate-700">
-              {isMe ? 'Todavía no confirmaste tu bracket.' : `${targetName} todavía no confirmó su bracket.`}
+              {isMe ? 'Todavía no confirmaste tus cruces.' : `${targetName} todavía no confirmó sus cruces.`}
             </p>
             <p className="mt-1 text-sm text-slate-500">
               Los picks de eliminatorias solo se hacen públicos cuando el participante pulsa
-              <strong> “Confirmar mi bracket”</strong>. Mientras tanto se mantienen privados.
+              <strong> “Confirmar mis cruces”</strong>. Mientras tanto se mantienen privados.
             </p>
             {isMe && (
               <Link
                 href="/pronosticos/clasificados"
                 className="mt-4 inline-block rounded-lg bg-emerald-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-800"
               >
-                Ir a completar mi bracket →
+                Ir a completar mis cruces →
               </Link>
             )}
           </div>
@@ -300,7 +300,7 @@ function PublicBracketBody({
       </div>
 
       <p className="mt-4 text-xs text-slate-400">
-        Bracket de solo lectura. El equipo <span className="font-semibold text-emerald-700">resaltado</span> es
+        Cruces de solo lectura. El equipo <span className="font-semibold text-emerald-700">resaltado</span> es
         quien este participante eligió que avanza. Los dieciseisavos se derivan automáticamente de sus marcadores de grupos.
       </p>
     </>

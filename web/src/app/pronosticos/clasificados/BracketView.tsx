@@ -99,7 +99,7 @@ export function BracketView({
       setTimeout(() => setBanner(null), 5000);
       return;
     }
-    setBanner({ kind: 'success', text: '✓ Bracket confirmado y bloqueado. ¡Suerte!' });
+    setBanner({ kind: 'success', text: '✓ Cruces confirmados y bloqueados. ¡Suerte!' });
     setTimeout(() => setBanner(null), 4000);
     router.refresh();
   }
@@ -110,9 +110,9 @@ export function BracketView({
     <div className="mt-6">
       {locked && (
         <div className="mb-4 rounded-lg border-2 border-emerald-300 bg-emerald-50 p-4">
-          <div className="font-bold text-emerald-900">🔒 Bracket confirmado</div>
+          <div className="font-bold text-emerald-900">🔒 Cruces confirmados</div>
           <p className="mt-1 text-sm text-emerald-800">
-            Confirmaste tu bracket el{' '}
+            Confirmaste tus cruces el{' '}
             {new Date(bracketLockedAt!).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}.
             No puedes cambiarlo. Para ajustes legítimos, contacta al admin.
           </p>
@@ -133,20 +133,20 @@ export function BracketView({
       {!locked && canConfirm && (
         <div className="mb-6 rounded-xl border-4 border-amber-500 bg-amber-50 p-5 shadow-lg">
           <div className="text-2xl font-extrabold text-amber-900">
-            ⚠️ ¡FALTA CONFIRMAR TU BRACKET!
+            ⚠️ ¡FALTA CONFIRMAR TUS CRUCES!
           </div>
           <p className="mt-2 text-base font-semibold text-amber-900">
             Ya llenaste los 32 cruces y el goleador, pero <u>todavía NO se guardó</u>.
             Tus picks de campeón, subcampeón, 3°, 4° y goleador
             <strong> NO cuentan para el ranking</strong> hasta que pulses
-            <strong> “Confirmar mi bracket”</strong> aquí abajo.
+            <strong> “Confirmar mis cruces”</strong> aquí abajo.
           </p>
           <button
             onClick={() => setConfirmingLock(true)}
             disabled={lockingNow}
             className="mt-4 w-full rounded-lg bg-amber-600 px-5 py-3 text-lg font-extrabold text-white hover:bg-amber-700 disabled:opacity-50 sm:w-auto"
           >
-            🔒 Confirmar mi bracket ahora
+            🔒 Confirmar mis cruces ahora
           </button>
         </div>
       )}
@@ -228,7 +228,7 @@ export function BracketView({
       {/* Botón Confirmar Bracket */}
       {!locked && (
         <div className="mt-8 rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
-          <h3 className="font-bold text-amber-900">¿Listo para confirmar tu bracket?</h3>
+          <h3 className="font-bold text-amber-900">¿Listo para confirmar tus cruces?</h3>
           <p className="mt-1 text-sm text-amber-900">
             Una vez confirmes, <strong>no podrás cambiar nada</strong>. Solo el admin podrá modificar.
           </p>
@@ -238,7 +238,7 @@ export function BracketView({
               disabled={!canConfirm || lockingNow}
               className="rounded-lg bg-emerald-700 px-5 py-2.5 font-bold text-white hover:bg-emerald-800 disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              {canConfirm ? '🔒 Confirmar mi bracket' : 'Falta completar todo'}
+              {canConfirm ? '🔒 Confirmar mis cruces' : 'Falta completar todo'}
             </button>
             {!canConfirm && (
               <span className="text-xs text-amber-800">
@@ -256,9 +256,9 @@ export function BracketView({
       {confirmingLock && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
           <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-            <h3 className="text-lg font-bold">¿Confirmar tu bracket?</h3>
+            <h3 className="text-lg font-bold">¿Confirmar tus cruces?</h3>
             <p className="mt-2 text-sm text-slate-600">
-              Después de esto <strong>no podrás cambiar nada</strong>: ni picks de bracket ni goleador.
+              Después de esto <strong>no podrás cambiar nada</strong>: ni picks de cruces ni goleador.
               Los marcadores de partidos siguen guardándose uno por uno aparte.
             </p>
             <div className="mt-5 flex justify-end gap-2">

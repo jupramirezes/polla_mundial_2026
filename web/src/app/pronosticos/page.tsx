@@ -46,7 +46,7 @@ export default async function PronosticosPage() {
     },
     {
       key: 'bracket',
-      title: '🏆 Bracket completo',
+      title: '🏆 Cruces completos',
       desc: 'R32 automático. Eliges octavos, cuartos, semis, final, campeón/sub/3°/4° y goleador.',
       pts: '520 pts',
       href: '/pronosticos/clasificados',
@@ -81,24 +81,24 @@ export default async function PronosticosPage() {
         <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
           💡 <strong>Tip:</strong> primero llena todo (lo que vayas escribiendo se guarda en tu navegador
           aunque cambies de pantalla). Cuando estés conforme, le das <strong>Guardar</strong> partido por partido.
-          Una vez guardado queda bloqueado y solo el admin puede cambiarlo. El <strong>bracket</strong> además
-          necesita un paso final: pulsar <strong>“Confirmar mi bracket”</strong> al terminar.
+          Una vez guardado queda bloqueado y solo el admin puede cambiarlo. Los <strong>cruces</strong> además
+          necesitan un paso final: pulsar <strong>“Confirmar mis cruces”</strong> al terminar.
         </div>
 
         {bracketNeedsConfirm && (
           <div className="mt-4 rounded-xl border-4 border-amber-500 bg-amber-50 p-5 shadow-lg">
-            <div className="text-2xl font-extrabold text-amber-900">⚠️ ¡FALTA CONFIRMAR TU BRACKET!</div>
+            <div className="text-2xl font-extrabold text-amber-900">⚠️ ¡FALTA CONFIRMAR TUS CRUCES!</div>
             <p className="mt-2 text-base font-semibold text-amber-900">
               Ya llenaste los 32 cruces y el goleador, pero <u>todavía NO los confirmaste</u>.
               Tus picks de eliminatorias (campeón, subcampeón, 3°, 4°) y tu goleador
-              <strong> NO cuentan para el ranking</strong> hasta que entres al bracket y pulses
-              <strong> “Confirmar mi bracket”</strong>.
+              <strong> NO cuentan para el ranking</strong> hasta que entres a los cruces y pulses
+              <strong> “Confirmar mis cruces”</strong>.
             </p>
             <Link
               href="/pronosticos/clasificados"
               className="mt-4 inline-block rounded-lg bg-amber-600 px-6 py-3 text-lg font-extrabold text-white hover:bg-amber-700"
             >
-              🔒 Ir a confirmar mi bracket →
+              🔒 Ir a confirmar mis cruces →
             </Link>
           </div>
         )}

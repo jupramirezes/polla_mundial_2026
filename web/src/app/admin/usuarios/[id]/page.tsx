@@ -195,8 +195,8 @@ export default async function AdminUserPage({ params }: PageProps) {
               <span className="font-mono">Puntos: <strong className="text-emerald-700">{totalPoints}</strong></span>
               {profileData.is_admin && <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-900">admin</span>}
               {bracketLocked
-                ? <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-semibold text-emerald-800">🔒 bracket confirmado</span>
-                : <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-900">⚠️ bracket sin confirmar</span>}
+                ? <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-semibold text-emerald-800">🔒 cruces confirmados</span>
+                : <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-900">⚠️ cruces sin confirmar</span>}
             </div>
           </div>
           <Link href="/admin/usuarios" className="text-sm text-emerald-700 hover:underline">
@@ -211,11 +211,11 @@ export default async function AdminUserPage({ params }: PageProps) {
 
         {!bracketLocked && (
           <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-            <strong>⚠️ Este usuario aún NO confirmó su bracket.</strong> Por la regla
+            <strong>⚠️ Este usuario aún NO confirmó sus cruces.</strong> Por la regla
             <em> &ldquo;no cuenta hasta guardar&rdquo;</em>, sus picks de eliminatorias (campeón,
             subcampeón, 3°, 4°) y su goleador <strong>todavía no suman puntos ni aparecen en el
             ranking</strong> hasta que se confirme. Sus marcadores de grupos sí cuentan a medida
-            que los guarda. (Picks de bracket válidos: {validPicksCount}/32.)
+            que los guarda. (Picks de cruces válidos: {validPicksCount}/32.)
             <div className="mt-2 flex items-center gap-2 flex-wrap">
               <LockBracketButton userId={userId} />
               <span className="text-[11px] text-amber-700">
@@ -228,9 +228,9 @@ export default async function AdminUserPage({ params }: PageProps) {
         {bracketLocked && (
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 flex items-center justify-between gap-3">
             <div className="text-sm text-amber-900">
-              El usuario confirmó su bracket el{' '}
+              El usuario confirmó sus cruces el{' '}
               {new Date(profileData.bracket_locked_at!).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}.
-              Si necesita editar bracket, desbloquéalo.
+              Si necesita editar sus cruces, desbloquéalo.
             </div>
             <UnlockBracketButton userId={userId} />
           </div>
@@ -247,7 +247,7 @@ export default async function AdminUserPage({ params }: PageProps) {
         />
 
         <section className="mt-8">
-          <h2 className="text-lg font-bold">Bracket de eliminatorias — cruces del usuario</h2>
+          <h2 className="text-lg font-bold">Cruces de eliminatorias del usuario</h2>
           <p className="text-xs text-slate-500 mb-2">
             Cada cruce que el usuario pickeó, ronda por ronda. El equipo <span className="font-bold text-emerald-700">resaltado</span> es
             su ganador elegido. Los cruces se derivan de sus marcadores de grupos + sus picks de ganador.
@@ -301,7 +301,7 @@ export default async function AdminUserPage({ params }: PageProps) {
         <section className="mt-8">
           <h2 className="text-lg font-bold">Top 4 + Goleador</h2>
           <p className="text-xs text-slate-500 mb-2">
-            Top 4 derivado del bracket del usuario: campeón = ganador de su Final, subcampeón = el
+            Top 4 derivado de los cruces del usuario: campeón = ganador de su Final, subcampeón = el
             otro finalista, 3° = ganador del Tercer Puesto, 4° = el otro. El goleador es editable.
           </p>
           <div className="rounded-lg border border-slate-200 bg-white p-3">

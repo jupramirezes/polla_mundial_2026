@@ -74,10 +74,10 @@ export default async function BracketsIndexPage() {
   return (
     <main className="flex-1 px-4 py-6">
       <div className="mx-auto max-w-3xl">
-        <h1 className="text-2xl font-bold">Brackets de los participantes</h1>
+        <h1 className="text-2xl font-bold">Cruces de los participantes</h1>
         <p className="mt-1 text-sm text-slate-600">
           Mira el camino completo que predijo cada quien: octavos, cuartos, semis, final, campeón y goleador.
-          Solo se muestran los brackets <strong>confirmados</strong> ({confirmedCount} de {participants.length}).
+          Solo se muestran los cruces <strong>confirmados</strong> ({confirmedCount} de {participants.length}).
         </p>
 
         <ul className="mt-6 grid gap-2 sm:grid-cols-2">
@@ -115,9 +115,9 @@ export default async function BracketsIndexPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="mt-2 text-xs text-slate-400">🔒 Aún no confirma su bracket</div>
+                    <div className="mt-2 text-xs text-slate-400">🔒 Aún no confirma sus cruces</div>
                   )}
-                  <div className="mt-2 text-xs font-semibold text-emerald-700">Ver bracket completo →</div>
+                  <div className="mt-2 text-xs font-semibold text-emerald-700">Ver cruces completos →</div>
                 </Link>
               </li>
             );

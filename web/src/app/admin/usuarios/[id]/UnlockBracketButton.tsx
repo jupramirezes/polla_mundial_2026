@@ -9,7 +9,7 @@ export function UnlockBracketButton({ userId }: { userId: string }) {
   const [pending, start] = useTransition();
 
   function handle() {
-    if (!confirm('Vas a desbloquear el bracket de este usuario. Podrá editar todo (clasificados, top, goleador). ¿Seguro?')) return;
+    if (!confirm('Vas a desbloquear los cruces de este usuario. Podrá editar todo (clasificados, top, goleador). ¿Seguro?')) return;
     start(async () => {
       const r = await adminUnlockBracket(userId);
       if (r.error) {

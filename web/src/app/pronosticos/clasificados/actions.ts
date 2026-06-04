@@ -118,7 +118,7 @@ export async function saveBracketWinner(input: z.infer<typeof winnerSchema>) {
   if (!me) return { error: 'no autenticado' };
 
   if (!me.isAdmin && await isBracketLocked(me.id)) {
-    return { error: 'Tu bracket ya está confirmado.' };
+    return { error: 'Tus cruces ya están confirmados.' };
   }
 
   const matchId = await getMatchIdForKnockoutNumber(parsed.matchNum);
@@ -132,7 +132,7 @@ export async function saveBracketWinner(input: z.infer<typeof winnerSchema>) {
   const aId = cruce && cruce.teamA.kind === 'resolved' ? cruce.teamA.teamId : null;
   const bId = cruce && cruce.teamB.kind === 'resolved' ? cruce.teamB.teamId : null;
   if (!aId || !bId) {
-    return { error: 'Aún no puedes elegir este cruce: primero completa y GUARDA toda tu fase de grupos (y las rondas previas del bracket).' };
+    return { error: 'Aún no puedes elegir este cruce: primero completa y GUARDA toda tu fase de grupos (y las rondas previas de los cruces).' };
   }
   if (parsed.winnerTeamId !== aId && parsed.winnerTeamId !== bId) {
     return { error: 'El equipo elegido no juega en ese cruce. Recarga la página e inténtalo de nuevo.' };
@@ -218,7 +218,7 @@ export async function adminLockBracket(userId: string) {
     .from('predictions_bracket_winners')
     .select('match_id', { count: 'exact', head: true })
     .eq('user_id', userId);
-  if ((count ?? 0) < 32) return { error: `El usuario tiene ${count ?? 0}/32 picks de bracket.` };
+  if ((count ?? 0) < 32) return { error: `El usuario tiene ${count ?? 0}/32 picks de cruces.` };
 
   const { data: scorer } = await supa
     .from('predictions_top_scorer').select('player_name').eq('user_id', userId).maybeSingle();
