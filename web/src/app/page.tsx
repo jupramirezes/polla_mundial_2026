@@ -133,18 +133,6 @@ export default async function HomePage() {
               campeón, tu subcampeón <em>es</em> el subcampeón, etc.
             </li>
           </ul>
-          <div className="mt-3 rounded-md border border-emerald-200 bg-white/70 p-3 text-sm text-slate-700">
-            <p className="font-semibold text-slate-900">
-              ❓ La duda más común: «¿Si acierto los 2 finalistas pero le pego al ganador equivocado, gano algo?»
-            </p>
-            <p className="mt-1">
-              <strong className="text-emerald-700">¡Sí!</strong> Ganas <strong>22 pts por cada
-              finalista</strong> que llegó a la final (= <strong>44 pts</strong>), más lo que esos 2
-              equipos ya te dieron en semis, cuartos, etc. Lo <strong>único</strong> que te pierdes es
-              el bonus de <strong>campeón (90)</strong> y <strong>subcampeón (60)</strong>, porque esos
-              sí son por posición exacta.
-            </p>
-          </div>
         </div>
 
         <div className="mt-6 rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
