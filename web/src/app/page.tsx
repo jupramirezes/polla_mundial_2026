@@ -66,27 +66,85 @@ export default async function HomePage() {
           <RuleCard
             icon="⚽"
             title="1. Marcadores de fase de grupos"
-            desc="Los 72 partidos. Por cada uno: 2 pts si aciertas el ganador, +3 pts si aciertas el marcador exacto. Las posiciones de cada grupo se calculan SOLAS a partir de tus marcadores."
             pts="máx 480 pts"
+            desc={
+              <>
+                Predices el marcador de los <strong>72 partidos</strong>. Por cada uno:{' '}
+                <strong>2 pts</strong> por acertar quién gana (o el empate) y{' '}
+                <strong>+3 pts</strong> extra si clavas el marcador exacto. Además, las{' '}
+                <strong>posiciones de cada grupo</strong> se calculan solas con tus marcadores y dan{' '}
+                <strong>4·3·2·1 pts</strong> (1°·2°·3°·4°) por grupo.
+              </>
+            }
           />
           <RuleCard
             icon="🎯"
             title="2. Clasificados a cada ronda"
-            desc="R32 (dieciseisavos) se llena automático: top 2 de cada grupo + 8 mejores 3ros con regla FIFA. De octavos en adelante eliges los que crees que pasan."
             pts="máx 252 pts"
+            desc={
+              <>
+                Por <strong>cada equipo que dejes en la ronda correcta</strong> ganas puntos:{' '}
+                <strong>no importa quién gane el cruce, solo que el equipo llegue ahí</strong>. Por
+                equipo → dieciseisavos <strong>2</strong>, octavos <strong>3</strong>, cuartos{' '}
+                <strong>6</strong>, semifinal <strong>12</strong>, final <strong>22</strong>. Los
+                dieciseisavos salen solos de tus grupos; de octavos en adelante eliges quién pasa.
+              </>
+            }
           />
           <RuleCard
             icon="🥇"
             title="3. Top 4 final + Goleador"
-            desc="Quién queda campeón, subcampeón, 3° y 4°. Y el goleador del mundial."
             pts="máx 268 pts"
+            desc={
+              <>
+                Bonus por acertar la <strong>posición EXACTA</strong>: campeón <strong>90</strong>,
+                subcampeón <strong>60</strong>, 3° <strong>40</strong>, 4° <strong>28</strong> (cada
+                uno cuenta aparte). + <strong>Goleador del mundial: 50 pts</strong>.
+              </>
+            }
           />
           <RuleCard
             icon="🔴"
             title="4. Marcadores en eliminatorias (EN VIVO)"
-            desc="Cuando empiezan los dieciseisavos, se abren formularios para predecir el marcador de cada partido (R32 → final). Mismas reglas: 2+3 pts por partido. Tienes hasta antes del pitazo inicial."
             pts="máx 160 pts"
+            desc={
+              <>
+                Cuando arrancan los dieciseisavos se abren formularios para predecir el{' '}
+                <strong>marcador de cada partido</strong> de eliminatoria (R32 → final). Mismas
+                reglas: <strong>2 pts</strong> ganador <strong>+3</strong> exacto, por cada uno. Tienes
+                hasta <strong>antes del pitazo inicial</strong> de cada partido.
+              </>
+            }
           />
+        </div>
+
+        {/* Explicación clave: cómo paga el bracket (responde la duda más común) */}
+        <div className="mt-6 rounded-lg border-2 border-emerald-300 bg-emerald-50 p-4">
+          <h3 className="font-bold text-emerald-900 mb-2">💡 Lo más importante: los cruces pagan de DOS formas</h3>
+          <ul className="space-y-2 text-sm text-emerald-900">
+            <li>
+              <strong>1) Por dejar equipos en la ronda correcta</strong> («Clasificados»). Cada equipo
+              que llegue a donde lo pusiste suma, <strong>aunque te equivoques de quién gana ese
+              partido</strong>. Y se acumula: un finalista tuyo que de verdad llega a la final ya te
+              sumó en 16avos, 8vos, cuartos, semis <em>y</em> final.
+            </li>
+            <li>
+              <strong>2) Por acertar el podio exacto</strong> («Top 4»): solo si tu campeón <em>es</em> el
+              campeón, tu subcampeón <em>es</em> el subcampeón, etc.
+            </li>
+          </ul>
+          <div className="mt-3 rounded-md border border-emerald-200 bg-white/70 p-3 text-sm text-slate-700">
+            <p className="font-semibold text-slate-900">
+              ❓ La duda más común: «¿Si acierto los 2 finalistas pero le pego al ganador equivocado, gano algo?»
+            </p>
+            <p className="mt-1">
+              <strong className="text-emerald-700">¡Sí!</strong> Ganas <strong>22 pts por cada
+              finalista</strong> que llegó a la final (= <strong>44 pts</strong>), más lo que esos 2
+              equipos ya te dieron en semis, cuartos, etc. Lo <strong>único</strong> que te pierdes es
+              el bonus de <strong>campeón (90)</strong> y <strong>subcampeón (60)</strong>, porque esos
+              sí son por posición exacta.
+            </p>
+          </div>
         </div>
 
         <div className="mt-6 rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
@@ -138,7 +196,7 @@ export default async function HomePage() {
 
 function RuleCard({
   icon, title, desc, pts,
-}: { icon: string; title: string; desc: string; pts: string }) {
+}: { icon: string; title: string; desc: React.ReactNode; pts: string }) {
   return (
     <div className="flex gap-3 rounded-lg border border-slate-200 bg-white p-4 hover:border-emerald-300 transition">
       <div className="text-2xl shrink-0">{icon}</div>
