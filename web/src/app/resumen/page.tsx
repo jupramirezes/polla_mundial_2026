@@ -34,23 +34,52 @@ export default async function ResumenPage({ searchParams }: PageProps) {
     { data: teams },
     { data: matches },
     { data: profiles },
-    { data: groupPreds },
-    { data: koPreds },
-    { data: bracketPicks },
   ] = await Promise.all([
     supabase.from('teams').select('*'),
     supabase.from('matches').select('*').eq('stage', stage).order('id'),
     supabase.from('profiles').select('id, display_name, bracket_locked_at'),
-    stage === 'group'
-      ? supabase.from('predictions_matches').select('user_id, match_id, home_score, away_score, locked_at').not('locked_at', 'is', null)
-      : { data: [] },
-    stage !== 'group'
-      ? supabase.from('predictions_knockout_matches').select('user_id, match_id, home_score, away_score, locked_at').not('locked_at', 'is', null)
-      : { data: [] },
-    stage !== 'group'
-      ? supabase.from('predictions_bracket_winners').select('user_id, match_id, winner_team_id')
-      : { data: [] },
   ]);
+
+  // Solo mostramos los partidos de esta etapa (en grupos, los del grupo elegido).
+  // Acotamos las predicciones a ESOS partidos: así cada query trae como mucho
+  // (partidos × usuarios) filas y NO choca con el tope de 1000 filas de Supabase
+  // (con 25+ usuarios, traer las ~1800 de toda la fase de grupos cortaba a ~14).
+  const filteredMatches = (
+    stage === 'group'
+      ? (matches ?? []).filter((m) => (m as MatchRow).group_letter === grupo)
+      : (matches ?? [])
+  ) as MatchRow[];
+  const displayMatchIds = filteredMatches.map((m) => m.id);
+
+  type ScoreRow = { user_id: string; match_id: number; home_score: number; away_score: number };
+  type WinRow = { user_id: string; match_id: number; winner_team_id: number };
+  let groupPreds: ScoreRow[] = [];
+  let koPreds: ScoreRow[] = [];
+  let bracketPicks: WinRow[] = [];
+  if (displayMatchIds.length > 0) {
+    if (stage === 'group') {
+      const { data } = await supabase
+        .from('predictions_matches')
+        .select('user_id, match_id, home_score, away_score')
+        .in('match_id', displayMatchIds)
+        .not('locked_at', 'is', null);
+      groupPreds = (data ?? []) as ScoreRow[];
+    } else {
+      const [{ data: ko }, { data: bw }] = await Promise.all([
+        supabase
+          .from('predictions_knockout_matches')
+          .select('user_id, match_id, home_score, away_score')
+          .in('match_id', displayMatchIds)
+          .not('locked_at', 'is', null),
+        supabase
+          .from('predictions_bracket_winners')
+          .select('user_id, match_id, winner_team_id')
+          .in('match_id', displayMatchIds),
+      ]);
+      koPreds = (ko ?? []) as ScoreRow[];
+      bracketPicks = (bw ?? []) as WinRow[];
+    }
+  }
 
   // Set de usuarios con bracket confirmado — solo estos exponen sus picks de ganador.
   const bracketLockedUserIds = new Set<string>();
@@ -81,10 +110,6 @@ export default async function ResumenPage({ searchParams }: PageProps) {
     if (!winnerPicksByMatch.has(r.match_id)) winnerPicksByMatch.set(r.match_id, []);
     winnerPicksByMatch.get(r.match_id)!.push({ user_id: r.user_id, winner_team_id: r.winner_team_id });
   }
-
-  const filteredMatches = stage === 'group'
-    ? (matches ?? []).filter((m) => (m as MatchRow).group_letter === grupo)
-    : (matches ?? []);
 
   return (
     <main className="flex-1 px-4 py-6">

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
+import { fetchAllRows } from '@/lib/supabase/fetch-all';
 import { getCurrentUser } from '@/lib/auth';
 import type { Team } from '@/lib/types';
 
@@ -24,7 +25,10 @@ export default async function BracketsIndexPage() {
     admin.from('profiles').select('id, display_name, bracket_locked_at'),
     admin.from('user_scores').select('user_id, total'),
     admin.from('teams').select('*'),
-    admin.from('predictions_bracket_winners').select('user_id, match_id, winner_team_id'),
+    fetchAllRows<{ user_id: string; match_id: number; winner_team_id: number }>(
+      (from, to) => admin.from('predictions_bracket_winners')
+        .select('user_id, match_id, winner_team_id')
+        .order('user_id').order('match_id').range(from, to)),
     admin.from('predictions_top_scorer').select('user_id, player_name'),
     admin.from('matches').select('id').eq('external_code', 'FINAL-01').maybeSingle(),
   ]);

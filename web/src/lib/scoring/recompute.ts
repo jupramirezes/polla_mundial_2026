@@ -8,6 +8,7 @@ import type { QualifierRound } from './rules';
 import { computeGroupStandings } from '@/lib/standings';
 import { derivePredictedR32, type UserGroupMatchPred } from '@/lib/predicted-r32';
 import { deriveUserBracket } from '@/lib/bracket/derive';
+import { fetchAllRows } from '@/lib/supabase/fetch-all';
 
 type MatchRow = {
   id: number;
@@ -151,16 +152,23 @@ export async function recomputeAllUserScores(): Promise<{ ok: true; users: numbe
     { data: predScorer },
     { data: predBracketWinners },
   ] = await Promise.all([
-    supa.from('predictions_matches')
-      .select('user_id, match_id, home_score, away_score')
-      .not('locked_at', 'is', null),
-    supa.from('predictions_knockout_matches')
-      .select('user_id, match_id, home_score, away_score')
-      .not('locked_at', 'is', null),
+    fetchAllRows<{ user_id: string; match_id: number; home_score: number; away_score: number }>(
+      (from, to) => supa.from('predictions_matches')
+        .select('user_id, match_id, home_score, away_score')
+        .not('locked_at', 'is', null)
+        .order('user_id').order('match_id').range(from, to)),
+    fetchAllRows<{ user_id: string; match_id: number; home_score: number; away_score: number }>(
+      (from, to) => supa.from('predictions_knockout_matches')
+        .select('user_id, match_id, home_score, away_score')
+        .not('locked_at', 'is', null)
+        .order('user_id').order('match_id').range(from, to)),
     supa.from('predictions_qualifiers').select('user_id, round, team_id'),
     supa.from('predictions_top_positions').select('user_id, position, team_id'),
     supa.from('predictions_top_scorer').select('user_id, player_name'),
-    supa.from('predictions_bracket_winners').select('user_id, match_id, winner_team_id'),
+    fetchAllRows<{ user_id: string; match_id: number; winner_team_id: number }>(
+      (from, to) => supa.from('predictions_bracket_winners')
+        .select('user_id, match_id, winner_team_id')
+        .order('user_id').order('match_id').range(from, to)),
   ]);
 
   // Indexar por user

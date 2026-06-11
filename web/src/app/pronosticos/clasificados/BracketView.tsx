@@ -113,7 +113,7 @@ export function BracketView({
           <div className="font-bold text-emerald-900">🔒 Cruces confirmados</div>
           <p className="mt-1 text-sm text-emerald-800">
             Confirmaste tus cruces el{' '}
-            {new Date(bracketLockedAt!).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}.
+            {new Date(bracketLockedAt!).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Bogota' })}.
             No puedes cambiarlo. Para ajustes legítimos, contacta al admin.
           </p>
         </div>

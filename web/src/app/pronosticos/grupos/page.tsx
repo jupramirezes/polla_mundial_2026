@@ -64,7 +64,7 @@ export default async function GruposPage() {
               <div className="mt-1 font-medium text-sm">
                 {phaseOpen ? '🟢 Abierto' : '🔒 Cerrado'}
                 <div className="text-xs text-slate-500 font-mono">
-                  {lockAt.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}
+                  {lockAt.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Bogota' })}
                 </div>
               </div>
             ) : (

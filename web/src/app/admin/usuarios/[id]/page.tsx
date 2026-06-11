@@ -229,7 +229,7 @@ export default async function AdminUserPage({ params }: PageProps) {
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 flex items-center justify-between gap-3">
             <div className="text-sm text-amber-900">
               El usuario confirmó sus cruces el{' '}
-              {new Date(profileData.bracket_locked_at!).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}.
+              {new Date(profileData.bracket_locked_at!).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Bogota' })}.
               Si necesita editar sus cruces, desbloquéalo.
             </div>
             <UnlockBracketButton userId={userId} />
