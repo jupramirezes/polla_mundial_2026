@@ -131,7 +131,11 @@ export function scoreTopScorer(
   predictedName: string,
   officialScorerNames: Iterable<string>,
 ): number {
-  const norm = (s: string) => s.trim().toLowerCase();
+  // Normaliza: minúsculas, sin tildes/diacríticos y sin espacios extra, para que
+  // "Mbappé" == "Mbappe", "MBAPPE" == "mbappe", etc. (los participantes escriben
+  // el nombre a mano y varían en tildes/mayúsculas).
+  const norm = (s: string) =>
+    s.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/\s+/g, ' ');
   const target = norm(predictedName);
   for (const official of officialScorerNames) {
     if (norm(official) === target) return POINTS.topScorer;
