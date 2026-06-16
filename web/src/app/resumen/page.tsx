@@ -15,6 +15,16 @@ const STAGE_LABEL: Record<string, string> = {
 };
 const STAGE_ORDER = ['group', 'r32', 'r16', 'qf', 'sf', 'tp', 'final'];
 
+/** Hora del partido en Bogotá (ej. "dom 11 jun, 6:00 p. m." o solo "6:00 p. m."). */
+function fmtKickoff(iso: string | null | undefined, withDay: boolean): string | null {
+  if (!iso) return null;
+  return new Date(iso).toLocaleString('es-CO', {
+    ...(withDay ? { weekday: 'short', day: 'numeric', month: 'short' } : {}),
+    hour: 'numeric', minute: '2-digit',
+    timeZone: 'America/Bogota',
+  });
+}
+
 interface PageProps {
   searchParams: Promise<{ etapa?: string; grupo?: string }>;
 }
@@ -24,64 +34,62 @@ export default async function ResumenPage({ searchParams }: PageProps) {
   if (!me) redirect('/login');
 
   const { etapa = 'group', grupo = 'A' } = await searchParams;
-  const stage = STAGE_ORDER.includes(etapa) ? etapa : 'group';
+  const isHoy = etapa === 'hoy';
+  const stage = isHoy ? 'hoy' : (STAGE_ORDER.includes(etapa) ? etapa : 'group');
 
-  // Usamos service_role porque /resumen muestra predicciones de TODOS los participantes,
-  // y la RLS de predictions_* restringe SELECT al propio user_id. Aquí filtramos manualmente
-  // por locked_at (grupos/KO) y por bracket_locked_at (bracket) para no exponer drafts.
+  // Rango "hoy" en Bogotá, expresado en instantes UTC para filtrar scheduled_at.
+  const bogotaDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date()); // 'YYYY-MM-DD'
+  const dayStart = new Date(`${bogotaDate}T00:00:00-05:00`);
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+
+  // service_role: /resumen muestra predicciones de TODOS. Filtramos manualmente
+  // por locked_at (grupos/KO) y por bracket_locked_at (bracket).
   const supabase = getSupabaseAdminClient();
-  const [
-    { data: teams },
-    { data: matches },
-    { data: profiles },
-  ] = await Promise.all([
+  const [{ data: teams }, { data: profiles }] = await Promise.all([
     supabase.from('teams').select('*'),
-    supabase.from('matches').select('*').eq('stage', stage).order('id'),
     supabase.from('profiles').select('id, display_name, bracket_locked_at'),
   ]);
 
-  // Solo mostramos los partidos de esta etapa (en grupos, los del grupo elegido).
-  // Acotamos las predicciones a ESOS partidos: así cada query trae como mucho
-  // (partidos × usuarios) filas y NO choca con el tope de 1000 filas de Supabase
-  // (con 25+ usuarios, traer las ~1800 de toda la fase de grupos cortaba a ~14).
-  const filteredMatches = (
-    stage === 'group'
-      ? (matches ?? []).filter((m) => (m as MatchRow).group_letter === grupo)
-      : (matches ?? [])
-  ) as MatchRow[];
-  const displayMatchIds = filteredMatches.map((m) => m.id);
+  // Partidos a mostrar: por etapa, o los de HOY (cualquier etapa, por scheduled_at).
+  let matchesRaw: MatchRow[];
+  if (isHoy) {
+    const { data } = await supabase.from('matches').select('*')
+      .gte('scheduled_at', dayStart.toISOString())
+      .lt('scheduled_at', dayEnd.toISOString())
+      .order('scheduled_at');
+    matchesRaw = (data ?? []) as MatchRow[];
+  } else {
+    const { data } = await supabase.from('matches').select('*').eq('stage', stage).order('id');
+    matchesRaw = (data ?? []) as MatchRow[];
+  }
+
+  const filteredMatches = (stage === 'group'
+    ? matchesRaw.filter((m) => m.group_letter === grupo)
+    : matchesRaw) as MatchRow[];
+
+  // Acotamos las predicciones SOLO a los partidos visibles (evita el tope de 1000 filas).
+  const groupMatchIds = filteredMatches.filter((m) => m.stage === 'group').map((m) => m.id);
+  const koMatchIds = filteredMatches.filter((m) => m.stage !== 'group').map((m) => m.id);
 
   type ScoreRow = { user_id: string; match_id: number; home_score: number; away_score: number };
   type WinRow = { user_id: string; match_id: number; winner_team_id: number };
-  let groupPreds: ScoreRow[] = [];
-  let koPreds: ScoreRow[] = [];
-  let bracketPicks: WinRow[] = [];
-  if (displayMatchIds.length > 0) {
-    if (stage === 'group') {
-      const { data } = await supabase
-        .from('predictions_matches')
-        .select('user_id, match_id, home_score, away_score')
-        .in('match_id', displayMatchIds)
-        .not('locked_at', 'is', null);
-      groupPreds = (data ?? []) as ScoreRow[];
-    } else {
-      const [{ data: ko }, { data: bw }] = await Promise.all([
-        supabase
-          .from('predictions_knockout_matches')
-          .select('user_id, match_id, home_score, away_score')
-          .in('match_id', displayMatchIds)
-          .not('locked_at', 'is', null),
-        supabase
-          .from('predictions_bracket_winners')
-          .select('user_id, match_id, winner_team_id')
-          .in('match_id', displayMatchIds),
-      ]);
-      koPreds = (ko ?? []) as ScoreRow[];
-      bracketPicks = (bw ?? []) as WinRow[];
-    }
-  }
+  const [{ data: gp }, { data: kp }, { data: bp }] = await Promise.all([
+    groupMatchIds.length
+      ? supabase.from('predictions_matches').select('user_id, match_id, home_score, away_score')
+          .in('match_id', groupMatchIds).not('locked_at', 'is', null)
+      : Promise.resolve({ data: [] as ScoreRow[] }),
+    koMatchIds.length
+      ? supabase.from('predictions_knockout_matches').select('user_id, match_id, home_score, away_score')
+          .in('match_id', koMatchIds).not('locked_at', 'is', null)
+      : Promise.resolve({ data: [] as ScoreRow[] }),
+    koMatchIds.length
+      ? supabase.from('predictions_bracket_winners').select('user_id, match_id, winner_team_id')
+          .in('match_id', koMatchIds)
+      : Promise.resolve({ data: [] as WinRow[] }),
+  ]);
 
-  // Set de usuarios con bracket confirmado — solo estos exponen sus picks de ganador.
   const bracketLockedUserIds = new Set<string>();
   for (const p of (profiles ?? []) as Array<{ id: string; bracket_locked_at: string | null }>) {
     if (p.bracket_locked_at) bracketLockedUserIds.add(p.id);
@@ -95,17 +103,16 @@ export default async function ResumenPage({ searchParams }: PageProps) {
     profileById.set(p.id, { display_name: p.display_name });
   }
 
-  // Marcadores predichos por matchId (grupos o KO)
+  // Marcadores predichos por matchId (grupos + KO combinados, para soportar "Hoy").
   const scoresByMatch = new Map<number, Array<{ user_id: string; home: number; away: number }>>();
-  const scoreRows = stage === 'group' ? (groupPreds ?? []) : (koPreds ?? []);
-  for (const r of scoreRows as Array<{ user_id: string; match_id: number; home_score: number; away_score: number }>) {
+  for (const r of ([...((gp ?? []) as ScoreRow[]), ...((kp ?? []) as ScoreRow[])])) {
     if (!scoresByMatch.has(r.match_id)) scoresByMatch.set(r.match_id, []);
     scoresByMatch.get(r.match_id)!.push({ user_id: r.user_id, home: r.home_score, away: r.away_score });
   }
 
-  // Bracket winner picks por matchId (solo para KO). Filtra a usuarios con bracket confirmado.
+  // Picks de ganador (bracket) por matchId — solo usuarios con bracket confirmado.
   const winnerPicksByMatch = new Map<number, Array<{ user_id: string; winner_team_id: number }>>();
-  for (const r of (bracketPicks ?? []) as Array<{ user_id: string; match_id: number; winner_team_id: number }>) {
+  for (const r of (bp ?? []) as WinRow[]) {
     if (!bracketLockedUserIds.has(r.user_id)) continue;
     if (!winnerPicksByMatch.has(r.match_id)) winnerPicksByMatch.set(r.match_id, []);
     winnerPicksByMatch.get(r.match_id)!.push({ user_id: r.user_id, winner_team_id: r.winner_team_id });
@@ -127,12 +134,20 @@ export default async function ResumenPage({ searchParams }: PageProps) {
         </div>
 
         <div className="mt-6 flex flex-wrap gap-1 border-b border-slate-200">
+          <Link
+            href="/resumen?etapa=hoy"
+            className={`-mb-px border-b-2 px-3 py-2 text-sm font-bold transition ${
+              isHoy ? 'border-emerald-700 text-emerald-900' : 'border-transparent text-emerald-700 hover:text-emerald-900'
+            }`}
+          >
+            🔴 Hoy
+          </Link>
           {STAGE_ORDER.map((s) => (
             <Link
               key={s}
               href={`/resumen?etapa=${s}${s === 'group' ? '&grupo=' + grupo : ''}`}
               className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
-                stage === s
+                !isHoy && stage === s
                   ? 'border-emerald-700 text-emerald-900'
                   : 'border-transparent text-slate-600 hover:text-slate-900'
               }`}
@@ -149,9 +164,7 @@ export default async function ResumenPage({ searchParams }: PageProps) {
                 key={letter}
                 href={`/resumen?etapa=group&grupo=${letter}`}
                 className={`rounded px-2 py-1 text-xs font-mono font-bold transition ${
-                  grupo === letter
-                    ? 'bg-emerald-700 text-white'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  grupo === letter ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
                 {letter}
@@ -160,34 +173,39 @@ export default async function ResumenPage({ searchParams }: PageProps) {
           </div>
         )}
 
-        <div className="mt-6 space-y-4">
+        {isHoy && (
+          <p className="mt-3 text-sm font-medium text-slate-700">
+            Partidos de hoy ({new Date(dayStart).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Bogota' })}) · hora Colombia
+          </p>
+        )}
+
+        <div className="mt-4 space-y-4">
           {filteredMatches.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
-              {stage === 'group'
-                ? `No hay partidos del Grupo ${grupo}.`
-                : 'Aún no hay partidos de esta ronda con equipos asignados.'}
+              {isHoy
+                ? 'No hay partidos hoy (o aún no se han cargado las horas de los partidos).'
+                : stage === 'group'
+                  ? `No hay partidos del Grupo ${grupo}.`
+                  : 'Aún no hay partidos de esta ronda con equipos asignados.'}
             </div>
           ) : (
-            filteredMatches.map((m) => {
-              const match = m as MatchRow;
+            filteredMatches.map((match) => {
               const home = match.home_team_id ? teamById.get(match.home_team_id) : null;
               const away = match.away_team_id ? teamById.get(match.away_team_id) : null;
-              const scores = scoresByMatch.get(match.id) ?? [];
-              const winnerPicks = winnerPicksByMatch.get(match.id) ?? [];
-              const officialFilled = match.home_score != null && match.away_score != null;
               return (
                 <MatchPredictionsCard
                   key={match.id}
                   match={match}
                   home={home}
                   away={away}
-                  scores={scores}
-                  winnerPicks={winnerPicks}
+                  kickoff={fmtKickoff(match.scheduled_at, !isHoy)}
+                  scores={scoresByMatch.get(match.id) ?? []}
+                  winnerPicks={winnerPicksByMatch.get(match.id) ?? []}
                   profileById={profileById}
                   teamById={teamById}
-                  officialFilled={officialFilled}
+                  officialFilled={match.home_score != null && match.away_score != null}
                   myUserId={me.id}
-                  isKnockout={stage !== 'group'}
+                  isKnockout={match.stage !== 'group'}
                 />
               );
             })
@@ -199,11 +217,12 @@ export default async function ResumenPage({ searchParams }: PageProps) {
 }
 
 function MatchPredictionsCard({
-  match, home, away, scores, winnerPicks, profileById, teamById, officialFilled, myUserId, isKnockout,
+  match, home, away, kickoff, scores, winnerPicks, profileById, teamById, officialFilled, myUserId, isKnockout,
 }: {
   match: MatchRow;
   home: Team | null | undefined;
   away: Team | null | undefined;
+  kickoff: string | null;
   scores: Array<{ user_id: string; home: number; away: number }>;
   winnerPicks: Array<{ user_id: string; winner_team_id: number }>;
   profileById: Map<string, { display_name: string }>;
@@ -212,21 +231,17 @@ function MatchPredictionsCard({
   myUserId: string;
   isKnockout: boolean;
 }) {
-  // Quién oficialmente ganó (para comparar)
   let officialWinnerId: number | null = null;
   if (officialFilled) {
     if (match.home_score! > match.away_score!) officialWinnerId = match.home_team_id;
     else if (match.away_score! > match.home_score!) officialWinnerId = match.away_team_id;
-    // empate: officialWinnerId stays null
   }
 
-  // Combinar: cualquier usuario que tenga score O winner pick
   const userIds = new Set<string>();
   for (const s of scores) userIds.add(s.user_id);
   for (const w of winnerPicks) userIds.add(w.user_id);
   const scoreByUser = new Map(scores.map((s) => [s.user_id, s]));
   const winnerByUser = new Map(winnerPicks.map((w) => [w.user_id, w.winner_team_id]));
-
   const hasAnyPick = userIds.size > 0;
 
   return (
@@ -236,6 +251,7 @@ function MatchPredictionsCard({
           {home ? <>{home.flag_emoji ?? ''} {home.name}</> : <span className="text-slate-400 italic">por definir</span>}
           <span className="mx-2 text-slate-400">vs</span>
           {away ? <>{away.flag_emoji ?? ''} {away.name}</> : <span className="text-slate-400 italic">por definir</span>}
+          {kickoff && <span className="ml-2 text-xs font-normal text-slate-500">🕐 {kickoff}</span>}
         </div>
         {officialFilled ? (
           <span className="rounded bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800">
@@ -247,9 +263,7 @@ function MatchPredictionsCard({
       </div>
 
       {!hasAnyPick ? (
-        <div className="px-4 py-3 text-sm text-slate-500">
-          Nadie ha guardado predicción aún.
-        </div>
+        <div className="px-4 py-3 text-sm text-slate-500">Nadie ha guardado predicción aún.</div>
       ) : (
         <ul className="divide-y divide-slate-100">
           {Array.from(userIds).map((userId) => {
@@ -260,23 +274,19 @@ function MatchPredictionsCard({
             const winnerTeam = winnerId ? teamById.get(winnerId) : null;
 
             const correctWinner = officialFilled && score && (
-              (Math.sign(score.home - score.away) === Math.sign(match.home_score! - match.away_score!))
+              Math.sign(score.home - score.away) === Math.sign(match.home_score! - match.away_score!)
             );
             const exactMatch = officialFilled && score && score.home === match.home_score && score.away === match.away_score;
             const correctBracketPick = officialFilled && officialWinnerId && winnerId === officialWinnerId;
 
             return (
-              <li
-                key={userId}
-                className={`px-4 py-2 text-sm ${isMe ? 'bg-amber-50/50' : ''}`}
-              >
+              <li key={userId} className={`px-4 py-2 text-sm ${isMe ? 'bg-amber-50/50' : ''}`}>
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <span className="font-medium">
                     {profile?.display_name ?? userId.slice(0, 8)}
                     {isMe && <span className="ml-2 rounded bg-amber-200 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">tú</span>}
                   </span>
                   <div className="flex items-center gap-3 text-xs flex-wrap">
-                    {/* Pick de ganador (bracket) — solo en KO */}
                     {isKnockout && winnerTeam && (
                       <span className="flex items-center gap-1">
                         <span className="text-slate-500">Ganador:</span>
@@ -288,7 +298,6 @@ function MatchPredictionsCard({
                         )}
                       </span>
                     )}
-                    {/* Pick de marcador */}
                     {score && (
                       <span className="flex items-center gap-1">
                         <span className="text-slate-500">Marcador:</span>
@@ -302,7 +311,6 @@ function MatchPredictionsCard({
                         )}
                       </span>
                     )}
-                    {/* Si solo tiene winner pick pero no score */}
                     {isKnockout && winnerTeam && !score && (
                       <span className="text-slate-400 italic text-[10px]">(sin marcador predicho)</span>
                     )}

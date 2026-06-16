@@ -30,6 +30,17 @@ export async function saveKnockoutPrediction(input: z.infer<typeof schema>) {
     return { error: 'Este partido ya está guardado y bloqueado. Si necesitas cambiarlo, contacta al admin.' };
   }
 
+  // Cierre global: solo se puede predecir hasta 5 minutos antes del inicio (para todos por igual).
+  // El cálculo es por instante absoluto (scheduled_at es timestamptz), así que es exacto sin importar la zona.
+  if (!me.isAdmin) {
+    const { data: match } = await supabase
+      .from('matches').select('scheduled_at').eq('id', parsed.matchId).maybeSingle();
+    const kickoff = (match as { scheduled_at?: string | null } | null)?.scheduled_at;
+    if (kickoff && Date.now() >= new Date(kickoff).getTime() - 5 * 60 * 1000) {
+      return { error: 'Este partido cerró: solo se podía predecir hasta 5 minutos antes del inicio.' };
+    }
+  }
+
   const client = me.isAdmin ? getSupabaseAdminClient() : supabase;
   const { error } = await client
     .from('predictions_knockout_matches')
