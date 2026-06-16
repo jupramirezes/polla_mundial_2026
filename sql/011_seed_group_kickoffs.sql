@@ -30,15 +30,15 @@ with sched(grp, a, b, ts) as (values
   -- 15 jun
   ('H','España','Cabo Verde','2026-06-15 11:00:00-05'),
   ('G','Bélgica','Egipto','2026-06-15 14:00:00-05'),
-  ('H','Arabia Saudita','Uruguay','2026-06-15 17:00:00-05'),
+  ('H','Arabia Saudí','Uruguay','2026-06-15 17:00:00-05'),
   ('G','Irán','Nueva Zelanda','2026-06-15 20:00:00-05'),
   -- 16 jun
   ('I','Francia','Senegal','2026-06-16 14:00:00-05'),
-  ('I','Irak','Noruega','2026-06-16 17:00:00-05'),
+  ('I','Iraq','Noruega','2026-06-16 17:00:00-05'),
   ('J','Argentina','Argelia','2026-06-16 20:00:00-05'),
   ('J','Austria','Jordania','2026-06-16 23:00:00-05'),
   -- 17 jun
-  ('K','Portugal','RD Congo','2026-06-17 12:00:00-05'),
+  ('K','Portugal','RD del Congo','2026-06-17 12:00:00-05'),
   ('L','Inglaterra','Croacia','2026-06-17 15:00:00-05'),
   ('L','Ghana','Panamá','2026-06-17 18:00:00-05'),
   ('K','Uzbekistán','Colombia','2026-06-17 21:00:00-05'),
@@ -58,20 +58,20 @@ with sched(grp, a, b, ts) as (values
   ('E','Ecuador','Curazao','2026-06-20 19:00:00-05'),
   ('F','Túnez','Japón','2026-06-20 23:00:00-05'),
   -- 21 jun
-  ('H','España','Arabia Saudita','2026-06-21 11:00:00-05'),
+  ('H','España','Arabia Saudí','2026-06-21 11:00:00-05'),
   ('G','Bélgica','Irán','2026-06-21 14:00:00-05'),
   ('H','Uruguay','Cabo Verde','2026-06-21 17:00:00-05'),
   ('G','Nueva Zelanda','Egipto','2026-06-21 20:00:00-05'),
   -- 22 jun
   ('J','Argentina','Austria','2026-06-22 12:00:00-05'),
-  ('I','Francia','Irak','2026-06-22 16:00:00-05'),
+  ('I','Francia','Iraq','2026-06-22 16:00:00-05'),
   ('I','Noruega','Senegal','2026-06-22 19:00:00-05'),
   ('J','Jordania','Argelia','2026-06-22 22:00:00-05'),
   -- 23 jun
   ('K','Portugal','Uzbekistán','2026-06-23 12:00:00-05'),
   ('L','Inglaterra','Ghana','2026-06-23 15:00:00-05'),
   ('L','Panamá','Croacia','2026-06-23 18:00:00-05'),
-  ('K','Colombia','RD Congo','2026-06-23 21:00:00-05'),
+  ('K','Colombia','RD del Congo','2026-06-23 21:00:00-05'),
   -- 24 jun (última fecha grupos A,B,C — simultáneos)
   ('B','Suiza','Canadá','2026-06-24 14:00:00-05'),
   ('B','Bosnia','Qatar','2026-06-24 14:00:00-05'),
@@ -88,8 +88,8 @@ with sched(grp, a, b, ts) as (values
   ('D','Paraguay','Australia','2026-06-25 21:00:00-05'),
   -- 26 jun
   ('I','Noruega','Francia','2026-06-26 14:00:00-05'),
-  ('I','Senegal','Irak','2026-06-26 14:00:00-05'),
-  ('H','Cabo Verde','Arabia Saudita','2026-06-26 19:00:00-05'),
+  ('I','Senegal','Iraq','2026-06-26 14:00:00-05'),
+  ('H','Cabo Verde','Arabia Saudí','2026-06-26 19:00:00-05'),
   ('H','Uruguay','España','2026-06-26 19:00:00-05'),
   ('G','Egipto','Irán','2026-06-26 22:00:00-05'),
   ('G','Nueva Zelanda','Bélgica','2026-06-26 22:00:00-05'),
@@ -97,7 +97,7 @@ with sched(grp, a, b, ts) as (values
   ('L','Panamá','Inglaterra','2026-06-27 16:00:00-05'),
   ('L','Croacia','Ghana','2026-06-27 16:00:00-05'),
   ('K','Colombia','Portugal','2026-06-27 18:30:00-05'),
-  ('K','RD Congo','Uzbekistán','2026-06-27 18:30:00-05'),
+  ('K','RD del Congo','Uzbekistán','2026-06-27 18:30:00-05'),
   ('J','Argelia','Austria','2026-06-27 21:00:00-05'),
   ('J','Jordania','Argentina','2026-06-27 21:00:00-05')
 )
