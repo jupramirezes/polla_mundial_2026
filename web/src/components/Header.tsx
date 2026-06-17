@@ -32,7 +32,7 @@ export async function Header() {
         </Link>
 
         {userEmail ? (
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
             <Link
               href="/pronosticos"
               className="text-sm font-medium text-white/90 hover:text-white hover:underline"
@@ -47,7 +47,7 @@ export async function Header() {
             </Link>
             <Link
               href="/brackets"
-              className="hidden sm:inline text-sm font-medium text-white/90 hover:text-white hover:underline"
+              className="text-sm font-medium text-white/90 hover:text-white hover:underline"
             >
               Cruces
             </Link>

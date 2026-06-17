@@ -42,6 +42,7 @@ export default async function PublicBracketPage({ params }: PageProps) {
     { data: predBracketWinners },
     { data: predScorer },
     { data: scores },
+    { data: myScore },
   ] = await Promise.all([
     admin.from('profiles').select('id, display_name, bracket_locked_at'),
     admin.from('teams').select('*'),
@@ -50,6 +51,7 @@ export default async function PublicBracketPage({ params }: PageProps) {
     admin.from('predictions_bracket_winners').select('match_id, winner_team_id').eq('user_id', userId),
     admin.from('predictions_top_scorer').select('player_name').eq('user_id', userId).maybeSingle(),
     admin.from('user_scores').select('user_id, total'),
+    admin.from('user_scores').select('*').eq('user_id', userId).maybeSingle(),
   ]);
 
   type ProfileRow = { id: string; display_name: string | null; bracket_locked_at: string | null };
@@ -83,6 +85,22 @@ export default async function PublicBracketPage({ params }: PageProps) {
     });
 
   const targetName = target.display_name ?? '(sin nombre)';
+
+  // Desglose de puntos del usuario (para que cada quien verifique cómo va sumando).
+  const sc = (myScore ?? {}) as Record<string, number | null>;
+  const n = (k: string) => Number(sc[k] ?? 0);
+  const pts = {
+    total: n('total'),
+    grupos: n('group_match_winner') + n('group_match_exact') + n('group_standings'),
+    gruposWHit: n('group_winners_hit'),
+    gruposEHit: n('group_exact_hit'),
+    clasificados: n('qual_r32') + n('qual_r16') + n('qual_qf') + n('qual_sf') + n('qual_final'),
+    ko: n('knockout_match_winner') + n('knockout_match_exact'),
+    koWHit: n('knockout_winners_hit'),
+    koEHit: n('knockout_exact_hit'),
+    top4: n('top_position_1') + n('top_position_2') + n('top_position_3') + n('top_position_4'),
+    goleador: n('top_scorer'),
+  };
 
   // helper de render de un lado del cruce
   const renderSide = (slot: ResolvedSlot, isPick: boolean) => {
@@ -160,6 +178,39 @@ export default async function PublicBracketPage({ params }: PageProps) {
               {!p.locked && '🔒 '}{p.name}
             </Link>
           ))}
+        </div>
+
+        {/* Desglose de puntos — para verificar cómo va sumando cada quien */}
+        <div className="mt-5 rounded-lg border border-slate-200 bg-white p-4">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-sm font-semibold">Puntos hasta ahora</h2>
+            <span className="font-mono text-2xl font-extrabold text-emerald-700">{pts.total}</span>
+          </div>
+          <ul className="mt-2 divide-y divide-slate-100 text-sm">
+            <li className="flex items-center justify-between py-1.5">
+              <span>⚽ Fase de grupos <span className="text-xs text-slate-400">({pts.gruposWHit} ganadores · {pts.gruposEHit} exactos)</span></span>
+              <span className="font-mono font-semibold">{pts.grupos}</span>
+            </li>
+            <li className="flex items-center justify-between py-1.5">
+              <span>🎯 Clasificados a rondas</span>
+              <span className="font-mono font-semibold">{pts.clasificados}</span>
+            </li>
+            <li className="flex items-center justify-between py-1.5">
+              <span>🔴 Eliminatorias en vivo <span className="text-xs text-slate-400">({pts.koWHit} ganadores · {pts.koEHit} exactos)</span></span>
+              <span className="font-mono font-semibold">{pts.ko}</span>
+            </li>
+            <li className="flex items-center justify-between py-1.5">
+              <span>🏆 Top 4 (campeón/sub/3°/4°)</span>
+              <span className="font-mono font-semibold">{pts.top4}</span>
+            </li>
+            <li className="flex items-center justify-between py-1.5">
+              <span>⚽ Goleador del mundial</span>
+              <span className="font-mono font-semibold">{pts.goleador}</span>
+            </li>
+          </ul>
+          <p className="mt-2 text-[11px] text-slate-400">
+            Cada categoría suma aparte. Para ver partido por partido qué acertó cada quien (exacto/ganador), entra a <strong>Resumen</strong>.
+          </p>
         </div>
 
         {!locked ? (

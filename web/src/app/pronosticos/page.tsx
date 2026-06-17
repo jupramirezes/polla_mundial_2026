@@ -38,6 +38,11 @@ export default async function PronosticosPage() {
       key: 'grupos',
       title: '⚽ Fase de grupos',
       desc: 'Predice los 72 marcadores. Las posiciones de cada grupo se calculan solas.',
+      detail: [
+        '2 pts por acertar quién gana cada partido',
+        '+3 pts extra si clavas el marcador exacto (5 en total)',
+        'Posiciones del grupo: 1° = 4 · 2° = 3 · 3° = 2 · 4° = 1 pts',
+      ],
       pts: '480 pts',
       href: '/pronosticos/grupos',
       progress: `${matchesFilled ?? 0} / 72 marcadores`,
@@ -48,6 +53,11 @@ export default async function PronosticosPage() {
       key: 'bracket',
       title: '🏆 Cruces completos',
       desc: 'R32 automático. Eliges octavos, cuartos, semis, final, campeón/sub/3°/4° y goleador.',
+      detail: [
+        'Clasificados (por cada equipo que llegue a la ronda): 16avos 2 · 8vos 3 · cuartos 6 · semis 12 · final 22',
+        'Top 4 (posición exacta): campeón 90 · sub 60 · 3° 40 · 4° 28',
+        'Goleador del mundial: 50 pts',
+      ],
       pts: '520 pts',
       href: '/pronosticos/clasificados',
       progress: bracketLocked
@@ -61,7 +71,12 @@ export default async function PronosticosPage() {
     {
       key: 'ko',
       title: '🔴 Marcadores en eliminatorias (EN VIVO)',
-      desc: 'Predice los marcadores de cada partido cuando el admin asigne los enfrentamientos.',
+      desc: 'Cuando arranca cada ronda, predices el marcador de cada partido de eliminatoria.',
+      detail: [
+        '2 pts ganador + 3 exacto, por cada partido (igual que en grupos)',
+        'Se abre cuando el admin asigna los enfrentamientos de la ronda',
+        'Cierra 5 minutos antes de cada partido',
+      ],
       pts: '160 pts',
       href: '/pronosticos/eliminatorias',
       progress: `${koPredsFilled ?? 0} marcadores predichos`,
@@ -112,6 +127,13 @@ export default async function PronosticosPage() {
                   <span className="text-xs font-mono text-emerald-700 font-semibold">{s.pts}</span>
                 </div>
                 <p className="mt-1 text-sm text-slate-600">{s.desc}</p>
+                <ul className="mt-2 space-y-0.5 text-xs text-slate-500">
+                  {s.detail.map((d, i) => (
+                    <li key={i} className="flex gap-1.5">
+                      <span className="text-emerald-600">•</span><span>{d}</span>
+                    </li>
+                  ))}
+                </ul>
                 <div className="mt-3 flex items-center justify-between gap-3">
                   <div className="text-xs font-mono">
                     {s.done
