@@ -7,6 +7,7 @@ import type { Team, MatchRow } from '@/lib/types';
 import { buildUserBracketView, isValidPick } from '@/lib/bracket/view';
 import type { ResolvedSlot } from '@/lib/bracket/derive';
 import { computeGroupStandings } from '@/lib/standings';
+import { scoreMatch } from '@/lib/scoring/calculate';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -39,6 +40,7 @@ export default async function PublicBracketPage({ params }: PageProps) {
     { data: teams },
     { data: matches },
     { data: predMatches },
+    { data: predKO },
     { data: predBracketWinners },
     { data: predScorer },
     { data: scores },
@@ -48,6 +50,7 @@ export default async function PublicBracketPage({ params }: PageProps) {
     admin.from('teams').select('*'),
     admin.from('matches').select('*').order('id'),
     admin.from('predictions_matches').select('match_id, home_score, away_score').eq('user_id', userId),
+    admin.from('predictions_knockout_matches').select('match_id, home_score, away_score').eq('user_id', userId),
     admin.from('predictions_bracket_winners').select('match_id, winner_team_id').eq('user_id', userId),
     admin.from('predictions_top_scorer').select('player_name').eq('user_id', userId).maybeSingle(),
     admin.from('user_scores').select('user_id, total'),
@@ -143,6 +146,35 @@ export default async function PublicBracketPage({ params }: PageProps) {
       }))
     : [];
 
+  // Detalle por partido: resultado oficial (ya jugado) vs el pronóstico de este
+  // usuario + los puntos que le dio. Transparencia total para alejar suspicacias.
+  const groupPredMap = new Map<number, { home: number; away: number }>();
+  for (const r of (predMatches ?? []) as Array<{ match_id: number; home_score: number; away_score: number }>) {
+    groupPredMap.set(r.match_id, { home: r.home_score, away: r.away_score });
+  }
+  const koPredMap = new Map<number, { home: number; away: number }>();
+  for (const r of (predKO ?? []) as Array<{ match_id: number; home_score: number; away_score: number }>) {
+    koPredMap.set(r.match_id, { home: r.home_score, away: r.away_score });
+  }
+  const playedDetail = ((matches ?? []) as MatchRow[])
+    .filter((m) => m.home_score != null && m.away_score != null && m.home_team_id && m.away_team_id)
+    .sort((a, b) => (a.scheduled_at ?? '').localeCompare(b.scheduled_at ?? '') || a.id - b.id)
+    .map((m) => {
+      const pred = (m.stage === 'group' ? groupPredMap : koPredMap).get(m.id) ?? null;
+      const points = pred
+        ? scoreMatch({ homeScore: pred.home, awayScore: pred.away }, { homeScore: m.home_score!, awayScore: m.away_score! }).total
+        : 0;
+      return {
+        id: m.id,
+        home: teamById.get(m.home_team_id!),
+        away: teamById.get(m.away_team_id!),
+        resHome: m.home_score!,
+        resAway: m.away_score!,
+        pred,
+        points,
+      };
+    });
+
   return (
     <main className="flex-1 px-4 py-6">
       <div className="mx-auto max-w-3xl">
@@ -209,9 +241,50 @@ export default async function PublicBracketPage({ params }: PageProps) {
             </li>
           </ul>
           <p className="mt-2 text-[11px] text-slate-400">
-            Cada categoría suma aparte. Para ver partido por partido qué acertó cada quien (exacto/ganador), entra a <strong>Resumen</strong>.
+            Cada categoría suma aparte. Abajo está el detalle partido por partido.
           </p>
         </div>
+
+        {playedDetail.length > 0 && (
+          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+            <h2 className="text-sm font-semibold">
+              Detalle por partido <span className="text-xs font-normal text-slate-400">(lo que ya jugó y te sumó)</span>
+            </h2>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-xs sm:text-sm">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wide text-slate-400">
+                    <th className="py-1 text-left font-medium">Partido</th>
+                    <th className="py-1 text-center font-medium">Oficial</th>
+                    <th className="py-1 text-center font-medium">Tu pick</th>
+                    <th className="py-1 text-right font-medium">Pts</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {playedDetail.map((d) => (
+                    <tr key={d.id} className="border-t border-slate-100">
+                      <td className="py-1 pr-2 whitespace-nowrap">
+                        {d.home?.flag_emoji ?? ''} {d.home?.name ?? '?'} <span className="text-slate-300">vs</span> {d.away?.flag_emoji ?? ''} {d.away?.name ?? '?'}
+                      </td>
+                      <td className="py-1 px-2 text-center font-mono font-semibold whitespace-nowrap">{d.resHome}-{d.resAway}</td>
+                      <td className="py-1 px-2 text-center font-mono text-slate-500 whitespace-nowrap">{d.pred ? `${d.pred.home}-${d.pred.away}` : '—'}</td>
+                      <td className="py-1 pl-2 text-right whitespace-nowrap">
+                        {d.points === 5
+                          ? <span className="font-bold text-emerald-700">+5 ✓exacto</span>
+                          : d.points === 2
+                            ? <span className="text-emerald-700">+2 ✓ganador</span>
+                            : <span className="text-slate-300">0</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400">
+              Marcador exacto = 5 pts · solo ganador = 2 pts. (Las posiciones de grupo y los clasificados suman aparte, arriba.)
+            </p>
+          </div>
+        )}
 
         {!locked ? (
           <div className="mt-6 rounded-xl border border-slate-300 bg-slate-50 p-6 text-center">
