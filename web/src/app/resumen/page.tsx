@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import type { MatchRow, Team } from '@/lib/types';
-import { getTopScorers } from '@/lib/api-football';
+import { getTopScorers } from '@/lib/top-scorers';
 
 const STAGE_LABEL: Record<string, string> = {
   group: 'Fase de grupos',
@@ -192,12 +192,10 @@ export default async function ResumenPage({ searchParams }: PageProps) {
 
         {isGoleadores && (
           <div className="mt-4">
-            <p className="mb-3 text-sm text-slate-600">⚽ Goleadores del Mundial · se actualiza solo cada ~2 horas (datos en vivo).</p>
+            <p className="mb-3 text-sm text-slate-600">⚽ Goleadores del Mundial · se actualiza solo cada ~2 horas (fuente: Wikipedia oficial del torneo).</p>
             {scorerData?.error ? (
               <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
-                {scorerData.error === 'no-key'
-                  ? 'Falta conectar la API de goleadores (variable API_FOOTBALL_KEY en Vercel).'
-                  : 'No se pudo cargar la tabla de goleadores ahora mismo. Reintenta en un rato.'}
+                No se pudo cargar la tabla de goleadores ahora mismo. Reintenta en un rato.
               </div>
             ) : (scorerData?.scorers.length ?? 0) === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
