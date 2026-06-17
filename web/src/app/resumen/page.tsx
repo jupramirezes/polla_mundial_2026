@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import type { MatchRow, Team } from '@/lib/types';
+import { getTopScorers } from '@/lib/api-football';
 
 const STAGE_LABEL: Record<string, string> = {
   group: 'Fase de grupos',
@@ -35,7 +36,9 @@ export default async function ResumenPage({ searchParams }: PageProps) {
 
   const { etapa = 'group', grupo = 'A' } = await searchParams;
   const isHoy = etapa === 'hoy';
-  const stage = isHoy ? 'hoy' : (STAGE_ORDER.includes(etapa) ? etapa : 'group');
+  const isGoleadores = etapa === 'goleadores';
+  const stage = isHoy ? 'hoy' : isGoleadores ? 'goleadores' : (STAGE_ORDER.includes(etapa) ? etapa : 'group');
+  const scorerData = isGoleadores ? await getTopScorers() : null;
 
   // Rango "hoy" en Bogotá, expresado en instantes UTC para filtrar scheduled_at.
   const bogotaDate = new Intl.DateTimeFormat('en-CA', {
@@ -142,6 +145,14 @@ export default async function ResumenPage({ searchParams }: PageProps) {
           >
             🔴 Hoy
           </Link>
+          <Link
+            href="/resumen?etapa=goleadores"
+            className={`-mb-px border-b-2 px-3 py-2 text-sm font-bold transition ${
+              isGoleadores ? 'border-emerald-700 text-emerald-900' : 'border-transparent text-emerald-700 hover:text-emerald-900'
+            }`}
+          >
+            ⚽ Goleadores
+          </Link>
           {STAGE_ORDER.map((s) => (
             <Link
               key={s}
@@ -179,6 +190,39 @@ export default async function ResumenPage({ searchParams }: PageProps) {
           </p>
         )}
 
+        {isGoleadores && (
+          <div className="mt-4">
+            <p className="mb-3 text-sm text-slate-600">⚽ Goleadores del Mundial · se actualiza solo cada ~2 horas (datos en vivo).</p>
+            {scorerData?.error ? (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
+                {scorerData.error === 'no-key'
+                  ? 'Falta conectar la API de goleadores (variable API_FOOTBALL_KEY en Vercel).'
+                  : 'No se pudo cargar la tabla de goleadores ahora mismo. Reintenta en un rato.'}
+              </div>
+            ) : (scorerData?.scorers.length ?? 0) === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
+                Aún no hay goles registrados en el torneo.
+              </div>
+            ) : (
+              <ol className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
+                {scorerData!.scorers.map((s) => (
+                  <li key={`${s.rank}-${s.name}`} className="flex items-center gap-3 px-4 py-2">
+                    <span className="w-6 text-center font-mono text-slate-400">{s.rank}</span>
+                    <span className="flex-1 min-w-0">
+                      <span className="font-medium">{s.name}</span>
+                      {s.team && <span className="ml-2 text-xs text-slate-500">{s.team}</span>}
+                    </span>
+                    <span className="font-mono font-bold text-emerald-700">
+                      {s.goals}<span className="ml-1 text-xs font-normal text-slate-400">{s.goals === 1 ? 'gol' : 'goles'}</span>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        )}
+
+        {!isGoleadores && (
         <div className="mt-4 space-y-4">
           {filteredMatches.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
@@ -211,6 +255,7 @@ export default async function ResumenPage({ searchParams }: PageProps) {
             })
           )}
         </div>
+        )}
       </div>
     </main>
   );
