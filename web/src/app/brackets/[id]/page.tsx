@@ -9,6 +9,7 @@ import type { ResolvedSlot } from '@/lib/bracket/derive';
 import { computeGroupStandings } from '@/lib/standings';
 import { scoreMatch, scoreGroupStandings } from '@/lib/scoring/calculate';
 import { POINTS } from '@/lib/scoring/rules';
+import { derivePredictedR32, type UserGroupMatchPred } from '@/lib/predicted-r32';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -149,35 +150,75 @@ export default async function PublicBracketPage({ params }: PageProps) {
     officialByGroup.get(m.group_letter)!.push({ homeTeamId: m.home_team_id, awayTeamId: m.away_team_id, homeScore: m.home_score, awayScore: m.away_score });
   }
 
+  // R32 que predice el USUARIO (top 2 de cada grupo + 8 mejores 3ros, derivado de
+  // sus marcadores) y R32 OFICIAL (equipos que de verdad están en los partidos de
+  // 16avos). Cruzándolos sabemos, por equipo, los +2 que ya sumó por clasificar.
+  const groupLetters = Array.from(teamsByGroup.keys()).sort();
+  const matchPredsByGroup = new Map<string, UserGroupMatchPred[]>();
+  for (const r of (predMatches ?? []) as Array<{ match_id: number; home_score: number; away_score: number }>) {
+    const m = matchById.get(r.match_id);
+    if (!m || m.stage !== 'group' || !m.group_letter || !m.home_team_id || !m.away_team_id) continue;
+    if (!matchPredsByGroup.has(m.group_letter)) matchPredsByGroup.set(m.group_letter, []);
+    matchPredsByGroup.get(m.group_letter)!.push({
+      matchId: m.id, groupLetter: m.group_letter,
+      homeTeamId: m.home_team_id, awayTeamId: m.away_team_id,
+      homeScore: r.home_score, awayScore: r.away_score,
+    });
+  }
+  const userR32 = derivePredictedR32(groupLetters, teamsByGroup, matchPredsByGroup);
+  const userR32Set = userR32.teams;
+  const thirdPassesByGroup = new Map<string, boolean | null>();
+  for (const g of userR32.byGroup) thirdPassesByGroup.set(g.groupLetter, g.thirdPasses);
+
+  const officialR32Set = new Set<number>();
+  for (const m of (matches ?? []) as MatchRow[]) {
+    if (m.stage !== 'r32') continue;
+    if (m.home_team_id) officialR32Set.add(m.home_team_id);
+    if (m.away_team_id) officialR32Set.add(m.away_team_id);
+  }
+  const r32Known = officialR32Set.size > 0;
+
   // Tarjetas por grupo (visibles para todos): orden predicho 1º→4º con su valor en
   // puntos (4·3·2·1), marca de quién pasa a 16avos (2 primeros directo, 3º puede
-  // colarse) y, si el grupo ya terminó, los puntos de posición ya ganados.
-  const groupCards = Array.from(teamsByGroup.keys()).sort().map((letter) => {
+  // colarse) y, si ya hay oficial, los puntos de posición (4·3·2·1) y de clasificado
+  // (+2 por equipo) ya ganados.
+  const groupCards = groupLetters.map((letter) => {
     const teamIds = teamsByGroup.get(letter)!;
     const pred = predByGroup.get(letter) ?? [];
     const predStanding = computeGroupStandings(teamIds, pred).slice(0, 4);
     const off = officialByGroup.get(letter) ?? [];
     const offDone = off.length >= 6 && off.every((m) => m.homeScore != null && m.awayScore != null);
     const offStanding = offDone ? computeGroupStandings(teamIds, off).slice(0, 4) : null;
+    const offPosByTeam = new Map<number, number>();
+    if (offStanding) for (const s of offStanding) offPosByTeam.set(s.teamId, s.position);
     const posPts = offStanding
       ? scoreGroupStandings(
           predStanding.map((s) => ({ position: s.position as 1 | 2 | 3 | 4, teamId: s.teamId })),
           offStanding.map((s) => ({ position: s.position as 1 | 2 | 3 | 4, teamId: s.teamId })),
         )
       : 0;
+    const rows = predStanding.map((s, i) => ({
+      teamId: s.teamId,
+      pos: i + 1,
+      posPts: POINTS.groupStandings[i],
+      advances: i < 2,
+      third: i === 2,
+      hit: offDone && offStanding ? offStanding[i]?.teamId === s.teamId : false,
+      realPos: offDone ? (offPosByTeam.get(s.teamId) ?? null) : null,
+      inUserR32: userR32Set.has(s.teamId),
+      qualified: r32Known && userR32Set.has(s.teamId) && officialR32Set.has(s.teamId),
+    }));
+    const clasifTeams = rows.filter((r) => r.qualified).map((r) => r.teamId);
     return {
       letter,
       filled: pred.length,
       offDone,
       posPts,
-      rows: predStanding.map((s, i) => ({
-        teamId: s.teamId,
-        pos: i + 1,
-        posPts: POINTS.groupStandings[i],
-        advances: i < 2,
-        third: i === 2,
-        hit: offDone && offStanding ? offStanding[i]?.teamId === s.teamId : false,
-      })),
+      r32Known,
+      thirdPasses: thirdPassesByGroup.get(letter) ?? null,
+      clasifTeams,
+      clasifPts: clasifTeams.length * POINTS.qualifiers.r32,
+      rows,
     };
   });
 
@@ -343,28 +384,49 @@ export default async function PublicBracketPage({ params }: PageProps) {
                 {g.filled < 6 ? (
                   <div className="px-2.5 py-3 text-center text-[11px] text-slate-400">Sin pronóstico completo del grupo</div>
                 ) : (
-                  <ol>
-                    {g.rows.map((r) => (
-                      <li
-                        key={r.teamId}
-                        className={`flex items-center gap-1.5 border-l-2 px-2.5 py-1 ${
-                          r.advances ? 'border-emerald-400 bg-emerald-50/40'
-                          : r.third ? 'border-amber-300 bg-amber-50/30'
-                          : 'border-transparent'
-                        }`}
-                      >
-                        <span className="w-4 tabular-nums text-slate-400">{r.pos}°</span>
-                        <span className={`flex-1 truncate ${r.advances ? 'font-medium text-slate-800' : 'text-slate-500'}`}>
-                          {teamLabel(r.teamId)}
-                        </span>
-                        {g.offDone
-                          ? (r.hit
-                              ? <span className="font-bold text-emerald-700">✓ +{r.posPts}</span>
-                              : <span className="text-slate-300">—</span>)
-                          : <span className="tabular-nums text-[10px] text-slate-400">vale {r.posPts}</span>}
-                      </li>
-                    ))}
-                  </ol>
+                  <>
+                    <ol>
+                      {g.rows.map((r) => (
+                        <li
+                          key={r.teamId}
+                          className={`flex items-center gap-1.5 border-l-2 px-2.5 py-1 ${
+                            r.advances ? 'border-emerald-400 bg-emerald-50/40'
+                            : r.third ? 'border-amber-300 bg-amber-50/30'
+                            : 'border-transparent'
+                          }`}
+                        >
+                          <span className="w-4 tabular-nums text-slate-400">{r.pos}°</span>
+                          <span className={`flex-1 truncate ${r.advances ? 'font-medium text-slate-800' : 'text-slate-500'}`}>
+                            {teamLabel(r.teamId)}
+                          </span>
+                          {g.offDone
+                            ? (r.hit
+                                ? <span className="whitespace-nowrap font-bold text-emerald-700">✓ +{r.posPts}</span>
+                                : <span className="whitespace-nowrap text-[10px] text-slate-400">{r.realPos ? `fue ${r.realPos}°` : '—'}</span>)
+                            : <span className="tabular-nums text-[10px] text-slate-400">vale {r.posPts}</span>}
+                        </li>
+                      ))}
+                    </ol>
+                    {g.offDone && (
+                      g.r32Known ? (
+                        <div className="border-t border-slate-100 px-2.5 py-1.5 text-[11px] leading-snug">
+                          <span className="text-slate-500">Clasificó a 16avos: </span>
+                          {g.clasifPts > 0 ? (
+                            <>
+                              <span className="font-bold text-emerald-700">+{g.clasifPts}</span>
+                              <span className="text-slate-500"> · {g.clasifTeams.map((tid) => teamLabel(tid)).join(' · ')}</span>
+                            </>
+                          ) : (
+                            <span className="text-slate-400">ninguno de los tuyos pasó</span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="border-t border-slate-100 px-2.5 py-1.5 text-[10px] text-slate-400">
+                          16avos: se define al cerrar todos los grupos
+                        </div>
+                      )
+                    )}
+                  </>
                 )}
               </div>
             ))}
@@ -374,6 +436,7 @@ export default async function PublicBracketPage({ params }: PageProps) {
             pasa directo (2 primeros)
             <span className="ml-2 mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-amber-300 align-middle"></span>
             3º (puede colarse entre los 8 mejores). Orden por Pts → diferencia de gol → goles a favor.
+            <br />Al cerrar el grupo: <span className="font-semibold text-emerald-700">✓ +N</span> = posición acertada (4·3·2·1); el pie de cada grupo muestra los <span className="font-semibold text-emerald-700">+2</span> por cada equipo tuyo que clasificó.
           </p>
         </div>
 
