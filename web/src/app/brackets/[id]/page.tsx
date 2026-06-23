@@ -4,10 +4,10 @@ import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getCurrentUser } from '@/lib/auth';
 import type { Team, MatchRow } from '@/lib/types';
-import { buildUserBracketView, isValidPick } from '@/lib/bracket/view';
+import { buildUserBracketView } from '@/lib/bracket/view';
 import type { ResolvedSlot } from '@/lib/bracket/derive';
 import { computeGroupStandings } from '@/lib/standings';
-import { scoreMatch, scoreGroupStandings } from '@/lib/scoring/calculate';
+import { scoreMatch, scoreGroupStandings, scoreTopScorer } from '@/lib/scoring/calculate';
 import { POINTS } from '@/lib/scoring/rules';
 import { derivePredictedR32, type UserGroupMatchPred } from '@/lib/predicted-r32';
 
@@ -47,6 +47,8 @@ export default async function PublicBracketPage({ params }: PageProps) {
     { data: predScorer },
     { data: scores },
     { data: myScore },
+    { data: officialTop },
+    { data: officialScorersRows },
   ] = await Promise.all([
     admin.from('profiles').select('id, display_name, bracket_locked_at'),
     admin.from('teams').select('*'),
@@ -57,6 +59,8 @@ export default async function PublicBracketPage({ params }: PageProps) {
     admin.from('predictions_top_scorer').select('player_name').eq('user_id', userId).maybeSingle(),
     admin.from('user_scores').select('user_id, total'),
     admin.from('user_scores').select('*').eq('user_id', userId).maybeSingle(),
+    admin.from('official_top_positions').select('position, team_id'),
+    admin.from('official_top_scorers').select('player_name'),
   ]);
 
   type ProfileRow = { id: string; display_name: string | null; bracket_locked_at: string | null };
@@ -170,13 +174,26 @@ export default async function PublicBracketPage({ params }: PageProps) {
   const thirdPassesByGroup = new Map<string, boolean | null>();
   for (const g of userR32.byGroup) thirdPassesByGroup.set(g.groupLetter, g.thirdPasses);
 
-  const officialR32Set = new Set<number>();
+  // Clasificados OFICIALES por ronda de eliminatorias: equipos que de verdad están
+  // en los partidos de cada ronda (igual que el recálculo). Sirve para mostrar, por
+  // equipo y por ronda, los puntos de clasificado ya ganados (R32 +2 … final +22).
+  const officialByRound = new Map<string, Set<number>>([
+    ['r32', new Set()], ['r16', new Set()], ['qf', new Set()], ['sf', new Set()], ['final', new Set()],
+  ]);
   for (const m of (matches ?? []) as MatchRow[]) {
-    if (m.stage !== 'r32') continue;
-    if (m.home_team_id) officialR32Set.add(m.home_team_id);
-    if (m.away_team_id) officialR32Set.add(m.away_team_id);
+    const set = officialByRound.get(m.stage);
+    if (!set) continue;
+    if (m.home_team_id) set.add(m.home_team_id);
+    if (m.away_team_id) set.add(m.away_team_id);
   }
+  const officialR32Set = officialByRound.get('r32')!;
   const r32Known = officialR32Set.size > 0;
+
+  // Top 4 oficial (posición → equipo) y goleador(es) oficial(es). Se llenan al
+  // cerrar el torneo; antes de eso, estas marcas no aparecen.
+  const officialTop4 = new Map<number, number>();
+  for (const r of (officialTop ?? []) as Array<{ position: number; team_id: number }>) officialTop4.set(r.position, r.team_id);
+  const officialScorers = ((officialScorersRows ?? []) as Array<{ player_name: string }>).map((r) => r.player_name);
 
   // Tarjetas por grupo (visibles para todos): orden predicho 1º→4º con su valor en
   // puntos (4·3·2·1), marca de quién pasa a 16avos (2 primeros directo, 3º puede
@@ -470,6 +487,9 @@ export default async function PublicBracketPage({ params }: PageProps) {
             scorerName={(predScorer as { player_name?: string } | null)?.player_name ?? null}
             renderSide={renderSide}
             teamLabel={teamLabel}
+            officialByRound={officialByRound}
+            officialTop4={officialTop4}
+            officialScorers={officialScorers}
           />
         )}
       </div>
@@ -479,21 +499,26 @@ export default async function PublicBracketPage({ params }: PageProps) {
 
 // Cuerpo del bracket confirmado: titulares (campeón/sub/3°/4°/goleador) + rondas.
 function PublicBracketBody({
-  view, scorerName, renderSide, teamLabel,
+  view, scorerName, renderSide, teamLabel, officialByRound, officialTop4, officialScorers,
 }: {
   view: ReturnType<typeof buildUserBracketView>;
   scorerName: string | null;
   renderSide: (slot: ResolvedSlot, isPick: boolean) => React.ReactNode;
   teamLabel: (id: number | null) => string | null;
+  officialByRound: Map<string, Set<number>>;
+  officialTop4: Map<number, number>;
+  officialScorers: string[];
 }) {
   const { stageMap, championId, subId, thirdId, fourthId } = view;
 
+  const top4Known = officialTop4.size > 0;
+  const scorerKnown = officialScorers.length > 0;
   const headline = [
-    { label: '🏆 Campeón', value: teamLabel(championId), cls: 'border-amber-300 bg-amber-50' },
-    { label: '🥈 Subcampeón', value: teamLabel(subId), cls: 'border-slate-300 bg-slate-50' },
-    { label: '🥉 Tercero', value: teamLabel(thirdId), cls: 'border-orange-200 bg-orange-50' },
-    { label: '4° puesto', value: teamLabel(fourthId), cls: 'border-slate-200 bg-white' },
-    { label: '⚽ Goleador', value: scorerName, cls: 'border-emerald-200 bg-emerald-50' },
+    { label: '🏆 Campeón', value: teamLabel(championId), cls: 'border-amber-300 bg-amber-50', known: top4Known, hit: championId != null && officialTop4.get(1) === championId, pts: POINTS.topPositions[0] },
+    { label: '🥈 Subcampeón', value: teamLabel(subId), cls: 'border-slate-300 bg-slate-50', known: top4Known, hit: subId != null && officialTop4.get(2) === subId, pts: POINTS.topPositions[1] },
+    { label: '🥉 Tercero', value: teamLabel(thirdId), cls: 'border-orange-200 bg-orange-50', known: top4Known, hit: thirdId != null && officialTop4.get(3) === thirdId, pts: POINTS.topPositions[2] },
+    { label: '4° puesto', value: teamLabel(fourthId), cls: 'border-slate-200 bg-white', known: top4Known, hit: fourthId != null && officialTop4.get(4) === fourthId, pts: POINTS.topPositions[3] },
+    { label: '⚽ Goleador', value: scorerName, cls: 'border-emerald-200 bg-emerald-50', known: scorerKnown, hit: !!scorerName && scoreTopScorer(scorerName, officialScorers) > 0, pts: POINTS.topScorer },
   ];
 
   return (
@@ -505,6 +530,11 @@ function PublicBracketBody({
             <div className="mt-0.5 font-bold truncate">
               {h.value ?? <span className="font-normal text-slate-400">—</span>}
             </div>
+            {h.known && (
+              h.hit
+                ? <div className="mt-1 text-[11px] font-bold text-emerald-700">✓ acertó · +{h.pts}</div>
+                : <div className="mt-1 text-[11px] text-slate-400">✗ no acertó</div>
+            )}
           </div>
         ))}
       </div>
@@ -514,14 +544,31 @@ function PublicBracketBody({
           const cruces = stageMap.get(stage) ?? [];
           if (cruces.length === 0) return null;
           const muted = stage === 'r32';
+          const roundSet = officialByRound.get(stage);
+          const val = (POINTS.qualifiers as Record<string, number>)[stage] ?? 0;
+          const roundKnown = !!roundSet && roundSet.size > 0 && val > 0;
+          let hits = 0, total = 0;
+          if (roundKnown) {
+            for (const c of cruces) {
+              for (const side of [c.teamA, c.teamB]) {
+                if (side.kind === 'resolved') { total++; if (roundSet!.has(side.teamId)) hits++; }
+              }
+            }
+          }
           return (
             <div
               key={stage}
               className={`rounded-lg border p-3 ${muted ? 'border-slate-200 bg-slate-50/60' : 'border-slate-200 bg-white'}`}
             >
-              <h3 className="text-sm font-semibold mb-2">
-                {STAGE_LABEL[stage]}
-                {muted && <span className="ml-2 text-[11px] font-normal text-slate-400">(automático según sus grupos)</span>}
+              <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                <span>{STAGE_LABEL[stage]}</span>
+                {muted && <span className="text-[11px] font-normal text-slate-400">(de tus grupos)</span>}
+                {roundKnown && (
+                  <span className="ml-auto flex items-center gap-1.5">
+                    <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">+{hits * val}</span>
+                    <span className="text-[10px] font-normal text-slate-400">{hits}/{total} pasó · +{val} c/u</span>
+                  </span>
+                )}
               </h3>
               <table className="w-full text-xs sm:text-sm">
                 <tbody>
@@ -529,18 +576,18 @@ function PublicBracketBody({
                     const winnerId = c.userPickedWinnerTeamId;
                     const aPick = c.teamA.kind === 'resolved' && c.teamA.teamId === winnerId;
                     const bPick = c.teamB.kind === 'resolved' && c.teamB.teamId === winnerId;
-                    const valid = isValidPick(c);
+                    const aQual = roundKnown && c.teamA.kind === 'resolved' && roundSet!.has(c.teamA.teamId);
+                    const bQual = roundKnown && c.teamB.kind === 'resolved' && roundSet!.has(c.teamB.teamId);
                     return (
                       <tr key={c.matchNum} className="border-t border-slate-100 first:border-0">
-                        <td className="py-1 pr-2 text-right whitespace-nowrap">{renderSide(c.teamA, aPick)}</td>
+                        <td className="py-1 pr-2 text-right whitespace-nowrap">
+                          {aQual && <span className="mr-1 text-[10px] font-bold text-emerald-700">+{val}✓</span>}
+                          {renderSide(c.teamA, aPick)}
+                        </td>
                         <td className="py-1 px-1 text-center text-slate-300">vs</td>
-                        <td className="py-1 pl-2 whitespace-nowrap">{renderSide(c.teamB, bPick)}</td>
-                        <td className="py-1 pl-3 text-right whitespace-nowrap">
-                          {muted
-                            ? null
-                            : valid
-                              ? <span className="text-emerald-700 font-semibold text-xs">✓ pasa</span>
-                              : <span className="text-slate-300 text-xs">—</span>}
+                        <td className="py-1 pl-2 whitespace-nowrap">
+                          {renderSide(c.teamB, bPick)}
+                          {bQual && <span className="ml-1 text-[10px] font-bold text-emerald-700">✓+{val}</span>}
                         </td>
                       </tr>
                     );
@@ -553,8 +600,11 @@ function PublicBracketBody({
       </div>
 
       <p className="mt-4 text-xs text-slate-400">
-        Cruces de solo lectura. El equipo <span className="font-semibold text-emerald-700">resaltado</span> es
-        quien este participante eligió que avanza. Los dieciseisavos se derivan automáticamente de sus marcadores de grupos.
+        El equipo <span className="font-semibold text-emerald-700">resaltado</span> es quien este participante
+        eligió que avanza. Cuando una ronda se juega, <span className="font-semibold text-emerald-700">✓ +N</span> marca
+        cada equipo suyo que de verdad llegó a esa ronda — esos son los puntos de clasificado que ya sumó
+        (16avos +2 · octavos +3 · cuartos +6 · semis +12 · final +22). El marcador de cada partido
+        (ganador/exacto) está en “Detalle por partido”, arriba.
       </p>
     </>
   );
