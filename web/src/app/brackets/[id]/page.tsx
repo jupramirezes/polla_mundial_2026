@@ -10,6 +10,7 @@ import { computeGroupStandings } from '@/lib/standings';
 import { scoreMatch, scoreGroupStandings, scoreTopScorer } from '@/lib/scoring/calculate';
 import { POINTS } from '@/lib/scoring/rules';
 import { derivePredictedR32, type UserGroupMatchPred } from '@/lib/predicted-r32';
+import { computeOfficialR32 } from '@/lib/official-r32';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -186,8 +187,13 @@ export default async function PublicBracketPage({ params }: PageProps) {
     if (m.home_team_id) set.add(m.home_team_id);
     if (m.away_team_id) set.add(m.away_team_id);
   }
+  // R32 derivado de RESULTADOS (top-2 por grupo terminado + 8 mejores 3ros al
+  // cerrar los 12), igual que el motor de puntos → la pantalla coincide con lo
+  // que realmente sumó, grupo por grupo (sin esperar "Autogenerar cruces").
+  const officialR32 = computeOfficialR32(teamsByGroup, officialByGroup);
   const officialR32Set = officialByRound.get('r32')!;
-  const r32Known = officialR32Set.size > 0;
+  for (const t of officialR32.teams) officialR32Set.add(t);
+  const thirdsResolved = officialR32.thirdsResolved;
 
   // Top 4 oficial (posición → equipo) y goleador(es) oficial(es). Se llenan al
   // cerrar el torneo; antes de eso, estas marcas no aparecen.
@@ -223,7 +229,7 @@ export default async function PublicBracketPage({ params }: PageProps) {
       hit: offDone && offStanding ? offStanding[i]?.teamId === s.teamId : false,
       realPos: offDone ? (offPosByTeam.get(s.teamId) ?? null) : null,
       inUserR32: userR32Set.has(s.teamId),
-      qualified: r32Known && userR32Set.has(s.teamId) && officialR32Set.has(s.teamId),
+      qualified: offDone && userR32Set.has(s.teamId) && officialR32Set.has(s.teamId),
     }));
     const clasifTeams = rows.filter((r) => r.qualified).map((r) => r.teamId);
     return {
@@ -231,7 +237,6 @@ export default async function PublicBracketPage({ params }: PageProps) {
       filled: pred.length,
       offDone,
       posPts,
-      r32Known,
       thirdPasses: thirdPassesByGroup.get(letter) ?? null,
       clasifTeams,
       clasifPts: clasifTeams.length * POINTS.qualifiers.r32,
@@ -425,23 +430,16 @@ export default async function PublicBracketPage({ params }: PageProps) {
                       ))}
                     </ol>
                     {g.offDone && (
-                      g.r32Known ? (
-                        <div className="border-t border-slate-100 px-2.5 py-1.5 text-[11px] leading-snug">
-                          <span className="text-slate-500">Clasificó a 16avos: </span>
-                          {g.clasifPts > 0 ? (
-                            <>
-                              <span className="font-bold text-emerald-700">+{g.clasifPts}</span>
-                              <span className="text-slate-500"> · {g.clasifTeams.map((tid) => teamLabel(tid)).join(' · ')}</span>
-                            </>
-                          ) : (
-                            <span className="text-slate-400">ninguno de los tuyos pasó</span>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="border-t border-slate-100 px-2.5 py-1.5 text-[10px] text-slate-400">
-                          16avos: se define al cerrar todos los grupos
-                        </div>
-                      )
+                      <div className="border-t border-slate-100 px-2.5 py-1.5 text-[11px] leading-snug">
+                        <span className="text-slate-500">Clasificó a 16avos: </span>
+                        <span className="font-bold text-emerald-700">+{g.clasifPts}</span>
+                        {g.clasifTeams.length > 0 && (
+                          <span className="text-slate-500"> · {g.clasifTeams.map((tid) => teamLabel(tid)).join(' · ')}</span>
+                        )}
+                        {!thirdsResolved && (
+                          <span className="text-slate-400"> · faltan los 3º (se definen al cerrar todos los grupos)</span>
+                        )}
+                      </div>
                     )}
                   </>
                 )}

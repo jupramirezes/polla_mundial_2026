@@ -6,6 +6,7 @@ import { computeUserScore } from './aggregate';
 import type { AllPredictions, OfficialResults } from './aggregate';
 import type { QualifierRound } from './rules';
 import { computeGroupStandings } from '@/lib/standings';
+import { computeOfficialR32 } from '@/lib/official-r32';
 import { derivePredictedR32, type UserGroupMatchPred } from '@/lib/predicted-r32';
 import { deriveUserBracket } from '@/lib/bracket/derive';
 import { fetchAllRows } from '@/lib/supabase/fetch-all';
@@ -96,6 +97,22 @@ export async function recomputeAllUserScores(): Promise<{ ok: true; users: numbe
       const round = r.round as QualifierRound;
       if (officialQual[round]) officialQual[round].add(r.team_id);
     }
+  }
+  // Clasificados R32 derivados de los RESULTADOS (no de los cruces ya armados):
+  // top-2 de cada grupo que cerró suma de inmediato; los 8 mejores 3ros cuando
+  // terminan los 12. Así los +2 caen grupo por grupo sin esperar "Autogenerar".
+  {
+    const officialMatchesByGroup = new Map<string, Array<{ homeTeamId: number; awayTeamId: number; homeScore: number | null; awayScore: number | null }>>();
+    for (const m of matchesById.values()) {
+      if (m.stage !== 'group' || !m.group_letter || !m.home_team_id || !m.away_team_id) continue;
+      if (!officialMatchesByGroup.has(m.group_letter)) officialMatchesByGroup.set(m.group_letter, []);
+      officialMatchesByGroup.get(m.group_letter)!.push({
+        homeTeamId: m.home_team_id, awayTeamId: m.away_team_id,
+        homeScore: m.home_score, awayScore: m.away_score,
+      });
+    }
+    const r32 = computeOfficialR32(teamsByGroup, officialMatchesByGroup);
+    for (const t of r32.teams) officialQual.r32.add(t);
   }
 
   // Posiciones finales oficiales (top 4)
