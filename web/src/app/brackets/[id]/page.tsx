@@ -7,7 +7,8 @@ import type { Team, MatchRow } from '@/lib/types';
 import { buildUserBracketView, isValidPick } from '@/lib/bracket/view';
 import type { ResolvedSlot } from '@/lib/bracket/derive';
 import { computeGroupStandings } from '@/lib/standings';
-import { scoreMatch } from '@/lib/scoring/calculate';
+import { scoreMatch, scoreGroupStandings } from '@/lib/scoring/calculate';
+import { POINTS } from '@/lib/scoring/rules';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -139,12 +140,46 @@ export default async function PublicBracketPage({ params }: PageProps) {
     if (!predByGroup.has(m.group_letter)) predByGroup.set(m.group_letter, []);
     predByGroup.get(m.group_letter)!.push({ homeTeamId: m.home_team_id, awayTeamId: m.away_team_id, homeScore: r.home_score, awayScore: r.away_score });
   }
-  const groupStandings = locked
-    ? Array.from(teamsByGroup.keys()).sort().map((letter) => ({
-        letter,
-        teamIds: computeGroupStandings(teamsByGroup.get(letter)!, predByGroup.get(letter) ?? []).map((s) => s.teamId),
-      }))
-    : [];
+  // Posiciones OFICIALES por grupo: se infieren de los resultados oficiales, igual
+  // que el recálculo real (solo cuando los 6 partidos del grupo ya se jugaron).
+  const officialByGroup = new Map<string, { homeTeamId: number; awayTeamId: number; homeScore: number | null; awayScore: number | null }[]>();
+  for (const m of (matches ?? []) as MatchRow[]) {
+    if (m.stage !== 'group' || !m.group_letter || !m.home_team_id || !m.away_team_id) continue;
+    if (!officialByGroup.has(m.group_letter)) officialByGroup.set(m.group_letter, []);
+    officialByGroup.get(m.group_letter)!.push({ homeTeamId: m.home_team_id, awayTeamId: m.away_team_id, homeScore: m.home_score, awayScore: m.away_score });
+  }
+
+  // Tarjetas por grupo (visibles para todos): orden predicho 1º→4º con su valor en
+  // puntos (4·3·2·1), marca de quién pasa a 16avos (2 primeros directo, 3º puede
+  // colarse) y, si el grupo ya terminó, los puntos de posición ya ganados.
+  const groupCards = Array.from(teamsByGroup.keys()).sort().map((letter) => {
+    const teamIds = teamsByGroup.get(letter)!;
+    const pred = predByGroup.get(letter) ?? [];
+    const predStanding = computeGroupStandings(teamIds, pred).slice(0, 4);
+    const off = officialByGroup.get(letter) ?? [];
+    const offDone = off.length >= 6 && off.every((m) => m.homeScore != null && m.awayScore != null);
+    const offStanding = offDone ? computeGroupStandings(teamIds, off).slice(0, 4) : null;
+    const posPts = offStanding
+      ? scoreGroupStandings(
+          predStanding.map((s) => ({ position: s.position as 1 | 2 | 3 | 4, teamId: s.teamId })),
+          offStanding.map((s) => ({ position: s.position as 1 | 2 | 3 | 4, teamId: s.teamId })),
+        )
+      : 0;
+    return {
+      letter,
+      filled: pred.length,
+      offDone,
+      posPts,
+      rows: predStanding.map((s, i) => ({
+        teamId: s.teamId,
+        pos: i + 1,
+        posPts: POINTS.groupStandings[i],
+        advances: i < 2,
+        third: i === 2,
+        hit: offDone && offStanding ? offStanding[i]?.teamId === s.teamId : false,
+      })),
+    };
+  });
 
   // Detalle por partido: resultado oficial (ya jugado) vs el pronóstico de este
   // usuario + los puntos que le dio. Transparencia total para alejar suspicacias.
@@ -281,10 +316,66 @@ export default async function PublicBracketPage({ params }: PageProps) {
               </table>
             </div>
             <p className="mt-2 text-[11px] text-slate-400">
-              Marcador exacto = 5 pts · solo ganador = 2 pts. (Las posiciones de grupo y los clasificados suman aparte, arriba.)
+              Marcador exacto = 5 pts · solo ganador = 2 pts. (Las posiciones de grupo y los clasificados suman aparte — mira la sección de abajo.)
             </p>
           </div>
         )}
+
+        {/* Posiciones de grupo y clasificación a 16avos. Visible para TODOS (estos
+            puntos cuentan con o sin bracket confirmado). Hace visible el mecanismo:
+            de dónde salen los puntos de posición y de clasificados, y cuándo suman. */}
+        <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+          <h2 className="text-sm font-semibold">Posiciones de grupo y clasificación a 16avos</h2>
+          <div className="mt-2 rounded-md bg-slate-50 p-2.5 text-[11px] leading-relaxed text-slate-600">
+            <p><strong className="text-slate-800">Posición exacta</strong> en el grupo: 1°=4 · 2°=3 · 3°=2 · 4°=1 pt. Se cuentan <strong>cuando el grupo termina</strong> (sus 6 partidos jugados).</p>
+            <p className="mt-1"><strong className="text-slate-800">Clasificar a 16avos</strong>: pasan los <strong>2 primeros</strong> de cada grupo + los <strong>8 mejores terceros</strong> (regla FIFA — sale solo de los resultados oficiales, no a mano). Cada equipo tuyo que clasifique de verdad = <strong className="text-emerald-700">+2 pts</strong>.</p>
+            <p className="mt-1">Si avanzan más rondas, cada equipo suma más: octavos <strong>+3</strong> · cuartos <strong>+6</strong> · semis <strong>+12</strong> · final <strong>+22</strong>.</p>
+          </div>
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {groupCards.map((g) => (
+              <div key={g.letter} className="rounded-lg border border-slate-200 overflow-hidden text-xs">
+                <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-2.5 py-1.5">
+                  <span className="font-semibold text-slate-600">Grupo {g.letter}</span>
+                  {g.offDone
+                    ? <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">✓ definido · +{g.posPts}</span>
+                    : <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">en juego</span>}
+                </div>
+                {g.filled < 6 ? (
+                  <div className="px-2.5 py-3 text-center text-[11px] text-slate-400">Sin pronóstico completo del grupo</div>
+                ) : (
+                  <ol>
+                    {g.rows.map((r) => (
+                      <li
+                        key={r.teamId}
+                        className={`flex items-center gap-1.5 border-l-2 px-2.5 py-1 ${
+                          r.advances ? 'border-emerald-400 bg-emerald-50/40'
+                          : r.third ? 'border-amber-300 bg-amber-50/30'
+                          : 'border-transparent'
+                        }`}
+                      >
+                        <span className="w-4 tabular-nums text-slate-400">{r.pos}°</span>
+                        <span className={`flex-1 truncate ${r.advances ? 'font-medium text-slate-800' : 'text-slate-500'}`}>
+                          {teamLabel(r.teamId)}
+                        </span>
+                        {g.offDone
+                          ? (r.hit
+                              ? <span className="font-bold text-emerald-700">✓ +{r.posPts}</span>
+                              : <span className="text-slate-300">—</span>)
+                          : <span className="tabular-nums text-[10px] text-slate-400">vale {r.posPts}</span>}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+            <span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-emerald-300 align-middle"></span>
+            pasa directo (2 primeros)
+            <span className="ml-2 mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-amber-300 align-middle"></span>
+            3º (puede colarse entre los 8 mejores). Orden por Pts → diferencia de gol → goles a favor.
+          </p>
+        </div>
 
         {!locked ? (
           <div className="mt-6 rounded-xl border border-slate-300 bg-slate-50 p-6 text-center">
@@ -316,7 +407,6 @@ export default async function PublicBracketPage({ params }: PageProps) {
             scorerName={(predScorer as { player_name?: string } | null)?.player_name ?? null}
             renderSide={renderSide}
             teamLabel={teamLabel}
-            groupStandings={groupStandings}
           />
         )}
       </div>
@@ -326,13 +416,12 @@ export default async function PublicBracketPage({ params }: PageProps) {
 
 // Cuerpo del bracket confirmado: titulares (campeón/sub/3°/4°/goleador) + rondas.
 function PublicBracketBody({
-  view, scorerName, renderSide, teamLabel, groupStandings,
+  view, scorerName, renderSide, teamLabel,
 }: {
   view: ReturnType<typeof buildUserBracketView>;
   scorerName: string | null;
   renderSide: (slot: ResolvedSlot, isPick: boolean) => React.ReactNode;
   teamLabel: (id: number | null) => string | null;
-  groupStandings: Array<{ letter: string; teamIds: number[] }>;
 }) {
   const { stageMap, championId, subId, thirdId, fourthId } = view;
 
@@ -356,29 +445,6 @@ function PublicBracketBody({
           </div>
         ))}
       </div>
-
-      {groupStandings.length > 0 && (
-        <div className="mt-6">
-          <h3 className="text-sm font-semibold mb-2">Fase de grupos <span className="text-[11px] font-normal text-slate-400">(cómo dejó cada grupo)</span></h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {groupStandings.map((g) => (
-              <div key={g.letter} className="rounded-lg border border-slate-200 bg-white p-2.5 text-xs">
-                <div className="font-semibold text-slate-500 mb-1">Grupo {g.letter}</div>
-                <ol className="space-y-0.5">
-                  {g.teamIds.map((tid, i) => (
-                    <li key={tid} className={i < 2 ? 'font-medium text-slate-800' : 'text-slate-400'}>
-                      <span className="inline-block w-4 text-slate-400">{i + 1}.</span> {teamLabel(tid)}
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            ))}
-          </div>
-          <p className="mt-1 text-[11px] text-slate-400">
-            Los 2 primeros (en negro) pasan directo; el 3º puede colarse entre los 8 mejores terceros.
-          </p>
-        </div>
-      )}
 
       <div className="mt-6 space-y-3">
         {STAGE_ORDER.map((stage) => {
