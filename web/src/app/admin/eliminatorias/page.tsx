@@ -32,15 +32,6 @@ export default async function AdminEliminatoriasPage() {
           </Link>
         </div>
 
-        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-          <strong className="block mb-1">📋 Cómo es el flujo completo de un partido KO:</strong>
-          <ol className="ml-4 list-decimal space-y-0.5">
-            <li>Aquí: <strong>asignas los 2 equipos</strong> del partido (ej. R32-01: México vs Senegal).</li>
-            <li>Eso abre automáticamente el formulario en <code className="bg-white px-1 rounded">/pronosticos/eliminatorias</code> para que los participantes predigan el marcador.</li>
-            <li>Cuando el partido termina, vas a <Link href="/admin/resultados" className="font-bold underline">/admin/resultados</Link> → tab de la etapa → metes el marcador OFICIAL (ej. 2-1). El ranking se recalcula solo.</li>
-          </ol>
-        </div>
-
         <div className="mt-6">
           <EliminatoriasForm
             teams={(teams ?? []) as Team[]}

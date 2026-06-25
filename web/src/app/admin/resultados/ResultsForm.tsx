@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { saveMatchResult, autofillGroupStageResults, clearGroupStageResults } from '../actions';
+import { saveMatchResult } from '../actions';
 import type { MatchRow, Team } from '@/lib/types';
 
 interface Props {
@@ -111,38 +111,6 @@ export function ResultsForm({ teams, matches }: Props) {
     }
   }
 
-  // --- Botones admin de autollenar / limpiar fase de grupos (testing) ---
-  const [adminPending, startAdmin] = useTransition();
-  const [adminMsg, setAdminMsg] = useState<string | null>(null);
-
-  function handleAutofill() {
-    if (!confirm('Vas a llenar los 72 partidos de fase de grupos con marcadores ALEATORIOS y sobreescribir los que ya tengas. ¿Seguro? (Solo para pruebas)')) return;
-    setAdminMsg(null);
-    startAdmin(async () => {
-      const r = await autofillGroupStageResults();
-      if (r.error) {
-        setAdminMsg('Error: ' + r.error);
-        return;
-      }
-      setAdminMsg(`✓ ${r.updated} partidos llenados con marcadores aleatorios.`);
-      router.refresh();
-    });
-  }
-
-  function handleClear() {
-    if (!confirm('Vas a BORRAR todos los marcadores oficiales de fase de grupos. ¿Seguro?')) return;
-    setAdminMsg(null);
-    startAdmin(async () => {
-      const r = await clearGroupStageResults();
-      if (r.error) {
-        setAdminMsg('Error: ' + r.error);
-        return;
-      }
-      setAdminMsg('✓ Marcadores de grupos borrados.');
-      router.refresh();
-    });
-  }
-
   function renderMatch(m: MatchRow) {
     const home = m.home_team_id ? teamById.get(m.home_team_id) : null;
     const away = m.away_team_id ? teamById.get(m.away_team_id) : null;
@@ -222,41 +190,6 @@ export function ResultsForm({ teams, matches }: Props) {
           Solo aparecen habilitados los partidos donde ya asignaste los 2 equipos en{' '}
           <a href="/admin/eliminatorias" className="underline font-semibold">/admin/eliminatorias</a>.
           Los demás aparecen como "por definir".
-        </div>
-      )}
-
-      {/* Toolbar admin para fase de grupos (solo testing) */}
-      {activeStage === 'group' && (
-        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <strong className="text-blue-900 text-sm">🧪 Herramienta de testing (solo admin)</strong>
-              <p className="text-xs text-blue-800 mt-0.5">
-                Llena los 72 marcadores con valores aleatorios para probar el sistema sin ingresar uno por uno.
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={handleAutofill}
-                disabled={adminPending}
-                className="rounded bg-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50"
-              >
-                🎲 Autollenar grupos
-              </button>
-              <button
-                onClick={handleClear}
-                disabled={adminPending}
-                className="rounded border border-red-300 bg-white px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
-              >
-                Borrar todo
-              </button>
-            </div>
-          </div>
-          {adminMsg && (
-            <p className={`mt-2 text-xs font-semibold ${adminMsg.startsWith('Error') ? 'text-red-700' : 'text-emerald-700'}`}>
-              {adminMsg}
-            </p>
-          )}
         </div>
       )}
 
