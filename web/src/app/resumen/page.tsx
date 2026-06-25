@@ -4,6 +4,8 @@ import { getCurrentUser } from '@/lib/auth';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import type { MatchRow, Team } from '@/lib/types';
 import { getTopScorers } from '@/lib/top-scorers';
+import { buildOfficialR32, type ResolvedR32Slot } from '@/lib/official-bracket';
+import type { MatchScore } from '@/lib/standings';
 
 const STAGE_LABEL: Record<string, string> = {
   group: 'Fase de grupos',
@@ -37,7 +39,8 @@ export default async function ResumenPage({ searchParams }: PageProps) {
   const { etapa = 'group', grupo = 'A' } = await searchParams;
   const isHoy = etapa === 'hoy';
   const isGoleadores = etapa === 'goleadores';
-  const stage = isHoy ? 'hoy' : isGoleadores ? 'goleadores' : (STAGE_ORDER.includes(etapa) ? etapa : 'group');
+  const isCuadro = etapa === 'cuadro';
+  const stage = isHoy ? 'hoy' : isGoleadores ? 'goleadores' : isCuadro ? 'cuadro' : (STAGE_ORDER.includes(etapa) ? etapa : 'group');
   const scorerData = isGoleadores ? await getTopScorers() : null;
 
   // Rango "hoy" en Bogotá, expresado en instantes UTC para filtrar scheduled_at.
@@ -54,6 +57,35 @@ export default async function ResumenPage({ searchParams }: PageProps) {
     supabase.from('teams').select('*'),
     supabase.from('profiles').select('id, display_name, bracket_locked_at'),
   ]);
+
+  // Pestaña "Cuadro": arma el cuadro oficial de 16avos desde los RESULTADOS
+  // (1° y 2° por grupo cerrado en vivo + 8 mejores 3ros al cerrar los 12).
+  let cuadroView: ReturnType<typeof buildOfficialR32> | null = null;
+  if (isCuadro) {
+    const { data: allM } = await supabase.from('matches')
+      .select('id, stage, group_letter, external_code, home_team_id, away_team_id, home_score, away_score')
+      .in('stage', ['group', 'r32']);
+    const teamsByGroup = new Map<string, number[]>();
+    for (const t of (teams ?? []) as Team[]) {
+      if (!t.group_letter) continue;
+      if (!teamsByGroup.has(t.group_letter)) teamsByGroup.set(t.group_letter, []);
+      teamsByGroup.get(t.group_letter)!.push(t.id);
+    }
+    const officialMatchesByGroup = new Map<string, MatchScore[]>();
+    const persistedR32 = new Map<number, { home: number | null; away: number | null }>();
+    for (const m of (allM ?? []) as MatchRow[]) {
+      if (m.stage === 'group' && m.group_letter && m.home_team_id && m.away_team_id) {
+        if (!officialMatchesByGroup.has(m.group_letter)) officialMatchesByGroup.set(m.group_letter, []);
+        officialMatchesByGroup.get(m.group_letter)!.push({
+          homeTeamId: m.home_team_id, awayTeamId: m.away_team_id, homeScore: m.home_score, awayScore: m.away_score,
+        });
+      } else if (m.stage === 'r32' && m.external_code) {
+        const mm = m.external_code.match(/^R32-(\d{2})$/);
+        if (mm) persistedR32.set(72 + parseInt(mm[1], 10), { home: m.home_team_id, away: m.away_team_id });
+      }
+    }
+    cuadroView = buildOfficialR32(teamsByGroup, officialMatchesByGroup, persistedR32);
+  }
 
   // Partidos a mostrar: por etapa, o los de HOY (cualquier etapa, por scheduled_at).
   let matchesRaw: MatchRow[];
@@ -153,6 +185,14 @@ export default async function ResumenPage({ searchParams }: PageProps) {
           >
             ⚽ Goleadores
           </Link>
+          <Link
+            href="/resumen?etapa=cuadro"
+            className={`-mb-px border-b-2 px-3 py-2 text-sm font-bold transition ${
+              isCuadro ? 'border-emerald-700 text-emerald-900' : 'border-transparent text-emerald-700 hover:text-emerald-900'
+            }`}
+          >
+            🔑 Cuadro
+          </Link>
           {STAGE_ORDER.map((s) => (
             <Link
               key={s}
@@ -220,7 +260,38 @@ export default async function ResumenPage({ searchParams }: PageProps) {
           </div>
         )}
 
-        {!isGoleadores && (
+        {isCuadro && cuadroView && (
+          <div className="mt-4">
+            <p className="mb-3 text-sm text-slate-600">
+              🔑 Así van quedando los cruces de 16avos. Se llena <strong>solo</strong>: los <strong>1°</strong> y <strong>2°</strong> de cada grupo entran apenas cierra el grupo; los <strong>8 mejores 3°</strong>, al cerrar los 12.
+            </p>
+            <div className="mb-3 flex flex-wrap gap-2 text-xs">
+              <span className="rounded bg-emerald-100 px-2 py-1 font-semibold text-emerald-800">{cuadroView.finishedGroups.length}/{cuadroView.totalGroups} grupos cerrados</span>
+              <span className="rounded bg-slate-100 px-2 py-1 font-semibold text-slate-700">{cuadroView.slotsFilled}/32 cupos definidos</span>
+              {!cuadroView.thirdsResolved && (
+                <span className="rounded bg-amber-100 px-2 py-1 font-medium text-amber-800">los 3° se ubican al cerrar todos los grupos</span>
+              )}
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {cuadroView.matches.map((m) => (
+                <div key={m.matchNum} className="rounded-lg border border-slate-200 bg-white p-2.5">
+                  <div className="font-mono text-[10px] uppercase tracking-wide text-slate-400">{m.code}</div>
+                  <div className="mt-1 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                    <CuadroSlot slot={m.slotA} teamById={teamById} align="right" />
+                    <span className="text-[11px] text-slate-300">vs</span>
+                    <CuadroSlot slot={m.slotB} teamById={teamById} align="left" />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-[11px] text-slate-400">
+              Se actualiza solo con los resultados oficiales. Las rondas siguientes (octavos en adelante) se irán
+              armando igual cuando empiece la eliminación.
+            </p>
+          </div>
+        )}
+
+        {!isGoleadores && !isCuadro && (
         <div className="mt-4 space-y-4">
           {filteredMatches.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
@@ -366,4 +437,24 @@ function MatchPredictionsCard({
       )}
     </div>
   );
+}
+
+// Un lado de una llave de 16avos: equipo resuelto (bandera + nombre + posición de
+// origen) o el slot pendiente ("2° Grupo B", "Mejor 3°") en gris.
+function CuadroSlot({ slot, teamById, align }: {
+  slot: ResolvedR32Slot;
+  teamById: Map<number, Team>;
+  align: 'left' | 'right';
+}) {
+  const cls = align === 'right' ? 'text-right' : 'text-left';
+  if (slot.teamId) {
+    const t = teamById.get(slot.teamId);
+    return (
+      <span className={`${cls} text-sm`}>
+        <span className="font-semibold">{t?.flag_emoji ?? ''} {t?.name ?? '?'}</span>
+        <span className="ml-1 text-[10px] font-normal text-slate-400">{slot.label}</span>
+      </span>
+    );
+  }
+  return <span className={`${cls} text-xs italic text-slate-400`}>{slot.label}</span>;
 }
