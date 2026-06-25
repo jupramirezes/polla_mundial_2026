@@ -5,9 +5,20 @@
 //     cualquier ajuste manual).
 // Una sola fuente de verdad para la pantalla; deriva de los RESULTADOS, no de un botón.
 
-import { R32_MATCHES } from './bracket/structure';
+import { R32_MATCHES, ALL_KNOCKOUT_MATCHES } from './bracket/structure';
 import { computeGroupStandings, type MatchScore } from './standings';
 import { lookupAnnexC, MATCH_FOR_WINNER_VS_THIRD, WINNER_SLOTS_FACING_THIRDS } from './bracket/annex-c';
+
+/** Código externo (R32-01, R16-03, QF-02, SF-01, TP-01, FINAL-01) a partir del nº de match. */
+export function codeFromMatchNum(n: number): string {
+  if (n >= 73 && n <= 88) return `R32-${String(n - 72).padStart(2, '0')}`;
+  if (n >= 89 && n <= 96) return `R16-${String(n - 88).padStart(2, '0')}`;
+  if (n >= 97 && n <= 100) return `QF-${String(n - 96).padStart(2, '0')}`;
+  if (n >= 101 && n <= 102) return `SF-${String(n - 100).padStart(2, '0')}`;
+  if (n === 103) return 'TP-01';
+  if (n === 104) return 'FINAL-01';
+  return `M${n}`;
+}
 
 const POS_LABEL: Record<number, string> = { 1: '1°', 2: '2°', 3: '3°' };
 
@@ -101,4 +112,58 @@ export function buildOfficialR32(
   });
 
   return { matches, finishedGroups, totalGroups: groupLetters.length, slotsFilled, thirdsResolved };
+}
+
+// ---- Rondas siguientes (octavos → final), formándose a medida que avanza el KO ----
+
+export interface OfficialKoSlot {
+  teamId: number | null;
+  /** "Ganador R32-01", "Perdedor SF-01" (origen del cupo). */
+  label: string;
+}
+export interface OfficialKoMatch {
+  matchNum: number;
+  code: string;
+  slotA: OfficialKoSlot;
+  slotB: OfficialKoSlot;
+}
+export interface OfficialKoRound {
+  stage: string;
+  label: string;
+  matches: OfficialKoMatch[];
+}
+
+const LATER_ROUNDS: Array<{ stage: string; label: string }> = [
+  { stage: 'r16', label: 'Octavos' },
+  { stage: 'qf', label: 'Cuartos' },
+  { stage: 'sf', label: 'Semifinales' },
+  { stage: 'tp', label: 'Tercer puesto' },
+  { stage: 'final', label: 'Final' },
+];
+
+/**
+ * Octavos → final del cuadro oficial. Cada cupo se resuelve al equipo persistido
+ * (que el auto-llenado pone con cada resultado KO) o muestra su origen
+ * ("Ganador R32-01"). Así el cuadro crece solo a medida que avanza el torneo.
+ */
+export function buildOfficialLaterRounds(
+  persisted: Map<number, { home: number | null; away: number | null }>,
+): OfficialKoRound[] {
+  return LATER_ROUNDS.map(({ stage, label }) => {
+    const matches = ALL_KNOCKOUT_MATCHES.filter((s) => s.stage === stage).map((spec) => {
+      const p = persisted.get(spec.matchNum) ?? { home: null, away: null };
+      const toSlot = (slot: typeof spec.teamA, teamId: number | null): OfficialKoSlot => {
+        const adv = slot as { kind: 'winner' | 'loser'; matchNum: number };
+        const verb = adv.kind === 'loser' ? 'Perdedor' : 'Ganador';
+        return { teamId, label: `${verb} ${codeFromMatchNum(adv.matchNum)}` };
+      };
+      return {
+        matchNum: spec.matchNum,
+        code: codeFromMatchNum(spec.matchNum),
+        slotA: toSlot(spec.teamA, p.home),
+        slotB: toSlot(spec.teamB, p.away),
+      };
+    });
+    return { stage, label, matches };
+  });
 }

@@ -23,7 +23,8 @@ export default async function AdminEliminatoriasPage() {
           <div>
             <h1 className="text-2xl font-bold">Enfrentamientos de eliminatorias</h1>
             <p className="mt-1 text-sm text-slate-600">
-              Paso 1 de 2 para cada partido KO: asignas QUIÉN JUEGA CONTRA QUIÉN.
+              Estos cruces se llenan <strong>solos</strong> con cada resultado oficial que guardas. Las
+              casillas de abajo son por si necesitas <strong>corregir algo a mano</strong> (excepción).
             </p>
           </div>
           <Link href="/admin" className="text-sm text-emerald-700 hover:underline">

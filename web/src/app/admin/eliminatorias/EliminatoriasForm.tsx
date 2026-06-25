@@ -23,15 +23,15 @@ export function EliminatoriasForm({ teams, matches }: { teams: Team[]; matches: 
   const [autogenMsg, setAutogenMsg] = useState<string | null>(null);
 
   function handleAutogen() {
-    if (!confirm('Voy a autogenerar los cruces de R32 desde los resultados OFICIALES de fase de grupos (requiere los 72 marcadores llenos). Y si hay resultados oficiales de R32, también genera octavos, y así. ¿Seguro?')) return;
+    if (!confirm('Voy a RE-GENERAR el cuadro oficial desde los resultados: 16avos (1° y 2° de cada grupo cerrado + mejores 3ros si ya cerraron los 12) y la cascada de octavos en adelante. Esto pisa ajustes manuales. ¿Seguro?\n\nNota: el cuadro ya se llena solo con cada resultado; este botón es para forzar/corregir.')) return;
     setAutogenMsg(null);
     startAutogen(async () => {
       const r = await autoGenerateKnockoutPairings();
-      if (r.error) {
+      if ('error' in r) {
         setAutogenMsg('❌ ' + r.error);
         return;
       }
-      setAutogenMsg(`✓ R32: ${r.r32} · Oct: ${r.r16} · 4tos: ${r.qf} · Semi: ${r.sf} · 3°P: ${r.tp} · Final: ${r.final}`);
+      setAutogenMsg(`✓ 16avos: ${r.r32} · Oct: ${r.r16} · 4tos: ${r.qf} · Semi: ${r.sf} · 3°P: ${r.tp} · Final: ${r.final}`);
       router.refresh();
     });
   }
@@ -95,11 +95,12 @@ export function EliminatoriasForm({ teams, matches }: { teams: Team[]; matches: 
       <div className="rounded-lg border-2 border-dashed border-blue-300 bg-blue-50 p-3">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
-            <strong className="text-blue-900 text-sm">🤖 Autogenerar cruces (admin)</strong>
+            <strong className="text-blue-900 text-sm">🤖 Cuadro automático</strong>
             <p className="text-xs text-blue-800 mt-0.5">
-              Lee los resultados oficiales de la fase de grupos y arma los 16 cruces de R32 según el
-              Anexo C de FIFA. Si hay resultados de R32, también arma octavos, y así sucesivamente
-              hasta donde lleguen los resultados.
+              El cuadro ya se arma <strong>solo</strong> con cada resultado que guardas: los <strong>1° y 2°</strong> de
+              cada grupo cerrado entran a su llave (los mejores <strong>3°</strong> al cerrar los 12, por Anexo C de FIFA),
+              y de <strong>octavos en adelante</strong> salen de los ganadores. No tienes que asignar a mano. Este botón
+              solo <strong>fuerza/corrige</strong> (re-deriva todo desde los resultados).
             </p>
           </div>
           <button
@@ -107,7 +108,7 @@ export function EliminatoriasForm({ teams, matches }: { teams: Team[]; matches: 
             disabled={autogenPending}
             className="rounded bg-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50"
           >
-            🤖 Autogenerar cruces
+            🤖 Re-generar cuadro
           </button>
         </div>
         {autogenMsg && (

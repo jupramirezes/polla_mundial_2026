@@ -4,7 +4,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import type { MatchRow, Team } from '@/lib/types';
 import { getTopScorers } from '@/lib/top-scorers';
-import { buildOfficialR32, type ResolvedR32Slot } from '@/lib/official-bracket';
+import { buildOfficialR32, buildOfficialLaterRounds } from '@/lib/official-bracket';
 import type { MatchScore } from '@/lib/standings';
 
 const STAGE_LABEL: Record<string, string> = {
@@ -61,30 +61,37 @@ export default async function ResumenPage({ searchParams }: PageProps) {
   // Pestaña "Cuadro": arma el cuadro oficial de 16avos desde los RESULTADOS
   // (1° y 2° por grupo cerrado en vivo + 8 mejores 3ros al cerrar los 12).
   let cuadroView: ReturnType<typeof buildOfficialR32> | null = null;
+  let cuadroLater: ReturnType<typeof buildOfficialLaterRounds> = [];
   if (isCuadro) {
     const { data: allM } = await supabase.from('matches')
-      .select('id, stage, group_letter, external_code, home_team_id, away_team_id, home_score, away_score')
-      .in('stage', ['group', 'r32']);
+      .select('id, stage, group_letter, external_code, home_team_id, away_team_id, home_score, away_score');
     const teamsByGroup = new Map<string, number[]>();
     for (const t of (teams ?? []) as Team[]) {
       if (!t.group_letter) continue;
       if (!teamsByGroup.has(t.group_letter)) teamsByGroup.set(t.group_letter, []);
       teamsByGroup.get(t.group_letter)!.push(t.id);
     }
+    const koNum = (code: string | null): number | null => {
+      const mm = code?.match(/^(R32|R16|QF|SF|TP|FINAL)-(\d{2})$/);
+      if (!mm) return null;
+      const i = parseInt(mm[2], 10);
+      return mm[1] === 'R32' ? 72 + i : mm[1] === 'R16' ? 88 + i : mm[1] === 'QF' ? 96 + i : mm[1] === 'SF' ? 100 + i : mm[1] === 'TP' ? 103 : 104;
+    };
     const officialMatchesByGroup = new Map<string, MatchScore[]>();
-    const persistedR32 = new Map<number, { home: number | null; away: number | null }>();
+    const persistedKO = new Map<number, { home: number | null; away: number | null }>();
     for (const m of (allM ?? []) as MatchRow[]) {
       if (m.stage === 'group' && m.group_letter && m.home_team_id && m.away_team_id) {
         if (!officialMatchesByGroup.has(m.group_letter)) officialMatchesByGroup.set(m.group_letter, []);
         officialMatchesByGroup.get(m.group_letter)!.push({
           homeTeamId: m.home_team_id, awayTeamId: m.away_team_id, homeScore: m.home_score, awayScore: m.away_score,
         });
-      } else if (m.stage === 'r32' && m.external_code) {
-        const mm = m.external_code.match(/^R32-(\d{2})$/);
-        if (mm) persistedR32.set(72 + parseInt(mm[1], 10), { home: m.home_team_id, away: m.away_team_id });
+      } else if (m.stage !== 'group') {
+        const n = koNum(m.external_code);
+        if (n) persistedKO.set(n, { home: m.home_team_id, away: m.away_team_id });
       }
     }
-    cuadroView = buildOfficialR32(teamsByGroup, officialMatchesByGroup, persistedR32);
+    cuadroView = buildOfficialR32(teamsByGroup, officialMatchesByGroup, persistedKO);
+    cuadroLater = buildOfficialLaterRounds(persistedKO);
   }
 
   // Partidos a mostrar: por etapa, o los de HOY (cualquier etapa, por scheduled_at).
@@ -272,6 +279,7 @@ export default async function ResumenPage({ searchParams }: PageProps) {
                 <span className="rounded bg-amber-100 px-2 py-1 font-medium text-amber-800">los 3° se ubican al cerrar todos los grupos</span>
               )}
             </div>
+            <h3 className="mb-2 text-sm font-semibold text-slate-700">Dieciseisavos</h3>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {cuadroView.matches.map((m) => (
                 <div key={m.matchNum} className="rounded-lg border border-slate-200 bg-white p-2.5">
@@ -284,9 +292,27 @@ export default async function ResumenPage({ searchParams }: PageProps) {
                 </div>
               ))}
             </div>
+
+            {cuadroLater.map((round) => (
+              <div key={round.stage} className="mt-4">
+                <h3 className="mb-2 text-sm font-semibold text-slate-700">{round.label}</h3>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {round.matches.map((mm) => (
+                    <div key={mm.matchNum} className="rounded-lg border border-slate-200 bg-white p-2.5">
+                      <div className="font-mono text-[10px] uppercase tracking-wide text-slate-400">{mm.code}</div>
+                      <div className="mt-1 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                        <CuadroSlot slot={mm.slotA} teamById={teamById} align="right" />
+                        <span className="text-[11px] text-slate-300">vs</span>
+                        <CuadroSlot slot={mm.slotB} teamById={teamById} align="left" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+
             <p className="mt-3 text-[11px] text-slate-400">
-              Se actualiza solo con los resultados oficiales. Las rondas siguientes (octavos en adelante) se irán
-              armando igual cuando empiece la eliminación.
+              Se arma solo con los resultados oficiales: 16avos desde las posiciones de grupo; octavos en adelante, con los ganadores de cada ronda.
             </p>
           </div>
         )}
@@ -442,7 +468,7 @@ function MatchPredictionsCard({
 // Un lado de una llave de 16avos: equipo resuelto (bandera + nombre + posición de
 // origen) o el slot pendiente ("2° Grupo B", "Mejor 3°") en gris.
 function CuadroSlot({ slot, teamById, align }: {
-  slot: ResolvedR32Slot;
+  slot: { teamId: number | null; label: string };
   teamById: Map<number, Team>;
   align: 'left' | 'right';
 }) {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildOfficialR32 } from '../official-bracket';
+import { buildOfficialR32, buildOfficialLaterRounds, codeFromMatchNum } from '../official-bracket';
 import type { MatchScore } from '../standings';
 
 // Round-robin de 4 equipos: a>b>c>d → standings a=1º, b=2º, c=3º, d=4º.
@@ -47,5 +47,37 @@ describe('buildOfficialR32', () => {
     const m73 = view.matches.find((m) => m.matchNum === 73)!;
     expect(m73.slotA.teamId).toBe(99);
     expect(m73.slotB.teamId).toBe(98);
+  });
+});
+
+describe('codeFromMatchNum', () => {
+  it('mapea nº de match a código externo', () => {
+    expect(codeFromMatchNum(73)).toBe('R32-01');
+    expect(codeFromMatchNum(89)).toBe('R16-01');
+    expect(codeFromMatchNum(97)).toBe('QF-01');
+    expect(codeFromMatchNum(101)).toBe('SF-01');
+    expect(codeFromMatchNum(103)).toBe('TP-01');
+    expect(codeFromMatchNum(104)).toBe('FINAL-01');
+  });
+});
+
+describe('buildOfficialLaterRounds', () => {
+  it('octavos toman los feeders correctos y resuelven equipos persistidos', () => {
+    // M89 (R16-01) = Ganador 74 (R32-02) vs Ganador 77 (R32-05).
+    const persisted = new Map<number, { home: number | null; away: number | null }>([
+      [89, { home: 7, away: null }],
+    ]);
+    const rounds = buildOfficialLaterRounds(persisted);
+    const r16 = rounds.find((r) => r.stage === 'r16')!;
+    const m89 = r16.matches.find((m) => m.matchNum === 89)!;
+    expect(m89.slotA.label).toBe('Ganador R32-02');
+    expect(m89.slotB.label).toBe('Ganador R32-05');
+    expect(m89.slotA.teamId).toBe(7);   // persistido
+    expect(m89.slotB.teamId).toBeNull(); // pendiente
+
+    // Tercer puesto usa "Perdedor" de las semis.
+    const tp = rounds.find((r) => r.stage === 'tp')!;
+    expect(tp.matches[0].slotA.label).toBe('Perdedor SF-01');
+    expect(tp.matches[0].slotB.label).toBe('Perdedor SF-02');
   });
 });
