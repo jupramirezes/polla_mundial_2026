@@ -62,9 +62,10 @@ export default async function ResumenPage({ searchParams }: PageProps) {
   // (1° y 2° por grupo cerrado en vivo + 8 mejores 3ros al cerrar los 12).
   let cuadroView: ReturnType<typeof buildOfficialR32> | null = null;
   let cuadroLater: ReturnType<typeof buildOfficialLaterRounds> = [];
+  const cuadroTimes = new Map<string, string | null>();
   if (isCuadro) {
     const { data: allM } = await supabase.from('matches')
-      .select('id, stage, group_letter, external_code, home_team_id, away_team_id, home_score, away_score');
+      .select('id, stage, group_letter, external_code, scheduled_at, home_team_id, away_team_id, home_score, away_score');
     const teamsByGroup = new Map<string, number[]>();
     for (const t of (teams ?? []) as Team[]) {
       if (!t.group_letter) continue;
@@ -86,6 +87,7 @@ export default async function ResumenPage({ searchParams }: PageProps) {
           homeTeamId: m.home_team_id, awayTeamId: m.away_team_id, homeScore: m.home_score, awayScore: m.away_score,
         });
       } else if (m.stage !== 'group') {
+        if (m.external_code) cuadroTimes.set(m.external_code, m.scheduled_at);
         const n = koNum(m.external_code);
         if (n) persistedKO.set(n, { home: m.home_team_id, away: m.away_team_id });
       }
@@ -283,7 +285,10 @@ export default async function ResumenPage({ searchParams }: PageProps) {
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {cuadroView.matches.map((m) => (
                 <div key={m.matchNum} className="rounded-lg border border-slate-200 bg-white p-2.5">
-                  <div className="font-mono text-[10px] uppercase tracking-wide text-slate-400">{m.code}</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-[10px] uppercase tracking-wide text-slate-400">{m.code}</span>
+                    {cuadroTimes.get(m.code) && <span className="text-[10px] text-slate-500">🕐 {fmtKickoff(cuadroTimes.get(m.code)!, true)}</span>}
+                  </div>
                   <div className="mt-1 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                     <CuadroSlot slot={m.slotA} teamById={teamById} align="right" />
                     <span className="text-[11px] text-slate-300">vs</span>
@@ -299,7 +304,10 @@ export default async function ResumenPage({ searchParams }: PageProps) {
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {round.matches.map((mm) => (
                     <div key={mm.matchNum} className="rounded-lg border border-slate-200 bg-white p-2.5">
-                      <div className="font-mono text-[10px] uppercase tracking-wide text-slate-400">{mm.code}</div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-[10px] uppercase tracking-wide text-slate-400">{mm.code}</span>
+                        {cuadroTimes.get(mm.code) && <span className="text-[10px] text-slate-500">🕐 {fmtKickoff(cuadroTimes.get(mm.code)!, true)}</span>}
+                      </div>
                       <div className="mt-1 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                         <CuadroSlot slot={mm.slotA} teamById={teamById} align="right" />
                         <span className="text-[11px] text-slate-300">vs</span>
