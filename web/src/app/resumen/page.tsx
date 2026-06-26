@@ -118,7 +118,8 @@ export default async function ResumenPage({ searchParams }: PageProps) {
   const koMatchIds = filteredMatches.filter((m) => m.stage !== 'group').map((m) => m.id);
 
   type ScoreRow = { user_id: string; match_id: number; home_score: number; away_score: number };
-  const [{ data: gp }, { data: kp }] = await Promise.all([
+  type WinRow = { user_id: string; match_id: number; winner_team_id: number };
+  const [{ data: gp }, { data: kp }, { data: bp }] = await Promise.all([
     groupMatchIds.length
       ? supabase.from('predictions_matches').select('user_id, match_id, home_score, away_score')
           .in('match_id', groupMatchIds).not('locked_at', 'is', null)
@@ -127,7 +128,16 @@ export default async function ResumenPage({ searchParams }: PageProps) {
       ? supabase.from('predictions_knockout_matches').select('user_id, match_id, home_score, away_score')
           .in('match_id', koMatchIds).not('locked_at', 'is', null)
       : Promise.resolve({ data: [] as ScoreRow[] }),
+    koMatchIds.length
+      ? supabase.from('predictions_bracket_winners').select('user_id, match_id, winner_team_id')
+          .in('match_id', koMatchIds)
+      : Promise.resolve({ data: [] as WinRow[] }),
   ]);
+
+  const bracketLockedUserIds = new Set<string>();
+  for (const p of (profiles ?? []) as Array<{ id: string; bracket_locked_at: string | null }>) {
+    if (p.bracket_locked_at) bracketLockedUserIds.add(p.id);
+  }
 
   const teamById = new Map<number, Team>();
   for (const t of (teams ?? []) as Team[]) teamById.set(t.id, t);
@@ -142,6 +152,15 @@ export default async function ResumenPage({ searchParams }: PageProps) {
   for (const r of ([...((gp ?? []) as ScoreRow[]), ...((kp ?? []) as ScoreRow[])])) {
     if (!scoresByMatch.has(r.match_id)) scoresByMatch.set(r.match_id, []);
     scoresByMatch.get(r.match_id)!.push({ user_id: r.user_id, home: r.home_score, away: r.away_score });
+  }
+
+  // Quién tiene cada quien avanzando en ese cruce (del bracket YA confirmado → público,
+  // se ve siempre). A diferencia del marcador, esto no se puede copiar (el bracket ya cerró).
+  const winnerPicksByMatch = new Map<number, Array<{ user_id: string; winner_team_id: number }>>();
+  for (const r of (bp ?? []) as WinRow[]) {
+    if (!bracketLockedUserIds.has(r.user_id)) continue;
+    if (!winnerPicksByMatch.has(r.match_id)) winnerPicksByMatch.set(r.match_id, []);
+    winnerPicksByMatch.get(r.match_id)!.push({ user_id: r.user_id, winner_team_id: r.winner_team_id });
   }
 
   return (
@@ -333,7 +352,9 @@ export default async function ResumenPage({ searchParams }: PageProps) {
                   away={away}
                   kickoff={fmtKickoff(match.scheduled_at, !isHoy)}
                   scores={revealed ? (scoresByMatch.get(match.id) ?? []) : []}
+                  winnerPicks={winnerPicksByMatch.get(match.id) ?? []}
                   profileById={profileById}
+                  teamById={teamById}
                   officialFilled={match.home_score != null && match.away_score != null}
                   myUserId={me.id}
                   isKnockout={isKo}
@@ -350,22 +371,32 @@ export default async function ResumenPage({ searchParams }: PageProps) {
 }
 
 function MatchPredictionsCard({
-  match, home, away, kickoff, scores, profileById, officialFilled, myUserId, isKnockout, revealed,
+  match, home, away, kickoff, scores, winnerPicks, profileById, teamById, officialFilled, myUserId, isKnockout, revealed,
 }: {
   match: MatchRow;
   home: Team | null | undefined;
   away: Team | null | undefined;
   kickoff: string | null;
   scores: Array<{ user_id: string; home: number; away: number }>;
+  winnerPicks: Array<{ user_id: string; winner_team_id: number }>;
   profileById: Map<string, { display_name: string }>;
+  teamById: Map<number, Team>;
   officialFilled: boolean;
   myUserId: string;
   isKnockout: boolean;
   revealed: boolean;
 }) {
+  let officialWinnerId: number | null = null;
+  if (officialFilled) {
+    if (match.home_score! > match.away_score!) officialWinnerId = match.home_team_id;
+    else if (match.away_score! > match.home_score!) officialWinnerId = match.away_team_id;
+  }
+
   const userIds = new Set<string>();
   for (const s of scores) userIds.add(s.user_id);
+  for (const w of winnerPicks) userIds.add(w.user_id);
   const scoreByUser = new Map(scores.map((s) => [s.user_id, s]));
+  const winnerByUser = new Map(winnerPicks.map((w) => [w.user_id, w.winner_team_id]));
   const hasAnyPick = userIds.size > 0;
 
   return (
@@ -386,45 +417,69 @@ function MatchPredictionsCard({
         )}
       </div>
 
-      {isKnockout && !revealed ? (
-        <div className="px-4 py-3 text-sm text-slate-500">
-          🔒 Los marcadores predichos se revelan cuando el partido <strong>cierra</strong> (5 min antes del inicio), para que nadie copie.
-        </div>
-      ) : !hasAnyPick ? (
+      {!hasAnyPick ? (
         <div className="px-4 py-3 text-sm text-slate-500">Nadie ha guardado predicción aún.</div>
       ) : (
-        <ul className="divide-y divide-slate-100">
-          {Array.from(userIds).map((userId) => {
-            const profile = profileById.get(userId);
-            const isMe = userId === myUserId;
-            const score = scoreByUser.get(userId)!;
-            const correctWinner = officialFilled && (
-              Math.sign(score.home - score.away) === Math.sign(match.home_score! - match.away_score!)
-            );
-            const exactMatch = officialFilled && score.home === match.home_score && score.away === match.away_score;
-            return (
-              <li key={userId} className={`px-4 py-2 text-sm ${isMe ? 'bg-amber-50/50' : ''}`}>
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <span className="font-medium">
-                    {profile?.display_name ?? userId.slice(0, 8)}
-                    {isMe && <span className="ml-2 rounded bg-amber-200 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">tú</span>}
-                  </span>
-                  <span className="flex items-center gap-1 text-xs">
-                    <span className="text-slate-500">Marcador:</span>
-                    <span className="font-mono font-bold">{score.home} - {score.away}</span>
-                    {officialFilled && (
-                      exactMatch
-                        ? <span className="text-emerald-700 font-bold">✓ exacto · 5 pts</span>
-                        : correctWinner
-                          ? <span className="text-emerald-700">✓ ganador · 2 pts</span>
-                          : <span className="text-red-700">✗</span>
-                    )}
-                  </span>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          {isKnockout && !revealed && (
+            <div className="border-b border-slate-100 px-4 py-2 text-[11px] text-slate-400">
+              🔒 Los <strong>marcadores</strong> predichos se revelan al cierre del partido (5 min antes), para que nadie copie. A quién tiene cada quien sí se ve.
+            </div>
+          )}
+          <ul className="divide-y divide-slate-100">
+            {Array.from(userIds).map((userId) => {
+              const profile = profileById.get(userId);
+              const isMe = userId === myUserId;
+              const score = scoreByUser.get(userId);
+              const winnerId = winnerByUser.get(userId);
+              const winnerTeam = winnerId ? teamById.get(winnerId) : null;
+              const correctWinner = officialFilled && score && (
+                Math.sign(score.home - score.away) === Math.sign(match.home_score! - match.away_score!)
+              );
+              const exactMatch = officialFilled && score && score.home === match.home_score && score.away === match.away_score;
+              const correctBracketPick = officialFilled && officialWinnerId && winnerId === officialWinnerId;
+              return (
+                <li key={userId} className={`px-4 py-2 text-sm ${isMe ? 'bg-amber-50/50' : ''}`}>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="font-medium">
+                      {profile?.display_name ?? userId.slice(0, 8)}
+                      {isMe && <span className="ml-2 rounded bg-amber-200 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">tú</span>}
+                    </span>
+                    <div className="flex items-center gap-3 text-xs flex-wrap">
+                      {isKnockout && winnerTeam && (
+                        <span className="flex items-center gap-1">
+                          <span className="text-slate-500">Pasa:</span>
+                          <span className="font-medium">{winnerTeam.flag_emoji ?? ''} {winnerTeam.name}</span>
+                          {officialFilled && officialWinnerId && (
+                            correctBracketPick
+                              ? <span className="text-emerald-700 font-bold">✓</span>
+                              : <span className="text-red-700">✗</span>
+                          )}
+                        </span>
+                      )}
+                      {score && (
+                        <span className="flex items-center gap-1">
+                          <span className="text-slate-500">Marcador:</span>
+                          <span className="font-mono font-bold">{score.home} - {score.away}</span>
+                          {officialFilled && (
+                            exactMatch
+                              ? <span className="text-emerald-700 font-bold">✓ exacto · 5 pts</span>
+                              : correctWinner
+                                ? <span className="text-emerald-700">✓ ganador · 2 pts</span>
+                                : <span className="text-red-700">✗</span>
+                          )}
+                        </span>
+                      )}
+                      {revealed && isKnockout && winnerTeam && !score && (
+                        <span className="text-slate-400 italic text-[10px]">(sin marcador predicho)</span>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
     </div>
   );
