@@ -137,10 +137,10 @@ async function fillOfficialBracket(
   supa: ReturnType<typeof getSupabaseAdminClient>,
   overwrite: boolean,
 ): Promise<{ r32: number; r16: number; qf: number; sf: number; tp: number; final: number } | { error: string }> {
-  type Row = { id: number; external_code: string; stage: string; group_letter: string | null; home_team_id: number | null; away_team_id: number | null; home_score: number | null; away_score: number | null };
+  type Row = { id: number; external_code: string; stage: string; group_letter: string | null; scheduled_at: string | null; home_team_id: number | null; away_team_id: number | null; home_score: number | null; away_score: number | null };
   const [{ data: teams }, { data: matches }] = await Promise.all([
     supa.from('teams').select('id, group_letter'),
-    supa.from('matches').select('id, external_code, stage, group_letter, home_team_id, away_team_id, home_score, away_score'),
+    supa.from('matches').select('id, external_code, stage, group_letter, scheduled_at, home_team_id, away_team_id, home_score, away_score'),
   ]);
 
   const teamsByGroup = new Map<string, number[]>();
@@ -181,16 +181,22 @@ async function fillOfficialBracket(
     }
 
     // --- Cascada R16 → Final desde los ganadores oficiales de cada ronda ---
+    // Un equipo solo avanza cuando su partido YA pasó su hora oficial — no por meter
+    // el resultado antes de tiempo. Así no suman puntos de ronda prematuramente.
+    const nowMs = Date.now();
+    const playedNow = (m?: Row): boolean =>
+      !!m && m.home_score != null && m.away_score != null &&
+      (!m.scheduled_at || new Date(m.scheduled_at).getTime() <= nowMs);
     const winnerOf = (m?: Row): number | null => {
-      if (!m || m.home_score == null || m.away_score == null) return null;
-      if (m.home_score > m.away_score) return m.home_team_id;
-      if (m.away_score > m.home_score) return m.away_team_id;
+      if (!playedNow(m)) return null;
+      if (m!.home_score! > m!.away_score!) return m!.home_team_id;
+      if (m!.away_score! > m!.home_score!) return m!.away_team_id;
       return null;
     };
     const loserOf = (m?: Row): number | null => {
-      if (!m || m.home_score == null || m.away_score == null) return null;
-      if (m.home_score < m.away_score) return m.home_team_id;
-      if (m.away_score < m.home_score) return m.away_team_id;
+      if (!playedNow(m)) return null;
+      if (m!.home_score! < m!.away_score!) return m!.home_team_id;
+      if (m!.away_score! < m!.home_score!) return m!.away_team_id;
       return null;
     };
     const R16: Record<string, [string, string]> = { 'R16-01': ['R32-02', 'R32-05'], 'R16-02': ['R32-01', 'R32-03'], 'R16-03': ['R32-04', 'R32-06'], 'R16-04': ['R32-07', 'R32-08'], 'R16-05': ['R32-11', 'R32-12'], 'R16-06': ['R32-09', 'R32-10'], 'R16-07': ['R32-14', 'R32-16'], 'R16-08': ['R32-13', 'R32-15'] };

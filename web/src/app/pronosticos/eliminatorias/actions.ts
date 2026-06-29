@@ -19,25 +19,16 @@ export async function saveKnockoutPrediction(input: z.infer<typeof schema>) {
 
   const supabase = await getSupabaseServerClient();
 
-  // ¿Ya bloqueado?
-  const { data: existing } = await supabase
-    .from('predictions_knockout_matches')
-    .select('locked_at')
-    .eq('user_id', me.id)
-    .eq('match_id', parsed.matchId)
-    .maybeSingle();
-  if (existing?.locked_at && !me.isAdmin) {
-    return { error: 'Este partido ya está guardado y bloqueado. Si necesitas cambiarlo, contacta al admin.' };
-  }
-
-  // Cierre global: solo se puede predecir hasta 5 minutos antes del inicio (para todos por igual).
-  // El cálculo es por instante absoluto (scheduled_at es timestamptz), así que es exacto sin importar la zona.
+  // Cierre global: se puede predecir/EDITAR hasta 10 minutos antes del inicio (para
+  // todos por igual). NO se bloquea al guardar: queda el último valor que haya a los
+  // 10 min. El cálculo es por instante absoluto (scheduled_at es timestamptz), así que
+  // es exacto sin importar la zona horaria.
   if (!me.isAdmin) {
     const { data: match } = await supabase
       .from('matches').select('scheduled_at').eq('id', parsed.matchId).maybeSingle();
     const kickoff = (match as { scheduled_at?: string | null } | null)?.scheduled_at;
-    if (kickoff && Date.now() >= new Date(kickoff).getTime() - 5 * 60 * 1000) {
-      return { error: 'Este partido cerró: solo se podía predecir hasta 5 minutos antes del inicio.' };
+    if (kickoff && Date.now() >= new Date(kickoff).getTime() - 10 * 60 * 1000) {
+      return { error: 'Este partido cerró: solo se podía predecir hasta 10 minutos antes del inicio.' };
     }
   }
 
