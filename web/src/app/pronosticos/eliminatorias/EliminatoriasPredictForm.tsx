@@ -36,7 +36,7 @@ function fmtKickoff(iso: string | null | undefined): string | null {
   });
 }
 
-export function EliminatoriasPredictForm({ teams, matches, initialPreds, isAdmin, userId }: Props) {
+export function EliminatoriasPredictForm({ teams, matches, initialPreds, userId }: Props) {
   const router = useRouter();
   const storageKey = `polla:ko:${userId}`;
   const teamById = useMemo(() => {
@@ -117,7 +117,7 @@ export function EliminatoriasPredictForm({ teams, matches, initialPreds, isAdmin
     const s = states.get(matchId);
     if (!s || s.home === '' || s.away === '') return;
     if (s.home === s.savedHome && s.away === s.savedAway) return; // sin cambios
-    if (isClosed(m) && !isAdmin) return;
+    if (isClosed(m)) return; // cerrado (10 min antes) — aplica a todos, sin excepción
     setSaving(matchId);
     const r = await saveKnockoutPrediction({ matchId, homeScore: Number(s.home), awayScore: Number(s.away) });
     setSaving(null);
@@ -187,7 +187,7 @@ export function EliminatoriasPredictForm({ teams, matches, initialPreds, isAdmin
                   const home = teamById.get(m.home_team_id!);
                   const away = teamById.get(m.away_team_id!);
                   const s = states.get(m.id) ?? { home: '', away: '', savedHome: '', savedAway: '' };
-                  const closed = isClosed(m) && !isAdmin;
+                  const closed = isClosed(m);
                   const filled = s.home !== '' && s.away !== '';
                   const isSaved = filled && s.home === s.savedHome && s.away === s.savedAway;
                   const kickoff = fmtKickoff(m.scheduled_at);
