@@ -65,12 +65,13 @@ export async function saveMatchResult(input: z.infer<typeof matchResultSchema>) 
     .eq('id', parsed.matchId);
   if (error) return { error: error.message };
 
+  // PRIMERO re-armar el cuadro (avanza/limpia equipos según los resultados ACTUALES),
+  // LUEGO recalcular puntos sobre el cuadro ya actualizado. Si no, al quitar/cambiar
+  // un resultado el recálculo leería asignaciones viejas y sumaría de más.
+  try { await fillOfficialBracket(supa, false); } catch { /* no-op */ }
+
   const recomp = await recomputeAllUserScores();
   if (!recomp.ok) return { error: 'guardado, pero falló recálculo: ' + recomp.error };
-
-  // Auto-armar el cuadro oficial (R32 de grupos cerrados + cascada KO) sin pisar
-  // asignaciones existentes. Best-effort: nunca debe romper el guardado del resultado.
-  try { await fillOfficialBracket(supa, false); } catch { /* no-op */ }
 
   revalidatePath('/admin');
   revalidatePath('/admin/eliminatorias');
@@ -159,11 +160,14 @@ async function fillOfficialBracket(
     }
   }
 
-  // Setea los equipos de una llave. En modo no-overwrite preserva lo ya puesto (manual).
-  const setTeams = async (row: Row | undefined, home: number | null, away: number | null): Promise<boolean> => {
+  // Setea los equipos de una llave. En modo no-overwrite preserva lo ya puesto (manual);
+  // con force=true SIEMPRE re-deriva (sirve para la cascada KO: si un feeder pierde su
+  // resultado, su ganador deja de estar definido y hay que LIMPIAR la ronda siguiente).
+  const setTeams = async (row: Row | undefined, home: number | null, away: number | null, force = false): Promise<boolean> => {
     if (!row) return false;
-    const newHome = overwrite ? home : (row.home_team_id ?? home);
-    const newAway = overwrite ? away : (row.away_team_id ?? away);
+    const ow = overwrite || force;
+    const newHome = ow ? home : (row.home_team_id ?? home);
+    const newAway = ow ? away : (row.away_team_id ?? away);
     if (newHome === row.home_team_id && newAway === row.away_team_id) return false;
     const { error } = await supa.from('matches').update({ home_team_id: newHome, away_team_id: newAway }).eq('id', row.id);
     if (error) throw new Error(error.message);
@@ -210,7 +214,9 @@ async function fillOfficialBracket(
       for (const [dest, [a, b]] of Object.entries(roundMap)) {
         const ta = useLosers ? loserOf(byExt.get(a)) : winnerOf(byExt.get(a));
         const tb = useLosers ? loserOf(byExt.get(b)) : winnerOf(byExt.get(b));
-        if (await setTeams(byExt.get(dest), ta, tb)) n++;
+        // force=true: la ronda siguiente SIEMPRE refleja los resultados actuales
+        // (si el feeder ya no tiene ganador definido, limpia la asignación pegada).
+        if (await setTeams(byExt.get(dest), ta, tb, true)) n++;
       }
       return n;
     };
