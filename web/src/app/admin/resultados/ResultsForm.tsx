@@ -43,11 +43,20 @@ export function ResultsForm({ teams, matches }: Props) {
   });
   const [statuses, setStatuses] = useState<Map<number, Status>>(new Map());
   const [activeStage, setActiveStage] = useState<string>('group');
+  // Quién AVANZÓ (winner_team_id). En KO importa, sobre todo en empate de 90' (penales):
+  // el marcador queda 1-1 (para los puntos) pero igual hay que decir quién pasó.
+  const [winners, setWinners] = useState<Map<number, number | null>>(() => {
+    const m = new Map<number, number | null>();
+    for (const match of matches) m.set(match.id, match.winner_team_id);
+    return m;
+  });
 
   // Ref para que el setTimeout callback siempre lea el scores MÁS NUEVO
   // (sin esto la closure captura un Map viejo y se guardaba {home:'2', away:''})
   const scoresRef = useRef(scores);
   useEffect(() => { scoresRef.current = scores; }, [scores]);
+  const winnersRef = useRef(winners);
+  useEffect(() => { winnersRef.current = winners; }, [winners]);
 
   const matchesByStage = useMemo(() => {
     const m = new Map<string, MatchRow[]>();
@@ -97,6 +106,7 @@ export function ResultsForm({ teams, matches }: Props) {
       matchId,
       homeScore: hasBoth ? Number(cur.home) : null,
       awayScore: hasBoth ? Number(cur.away) : null,
+      winnerTeamId: winnersRef.current.get(matchId) ?? null,
     });
     setStatuses((s) => new Map(s).set(matchId, r.ok ? 'saved' : 'error'));
     if (r.ok) {
@@ -111,47 +121,86 @@ export function ResultsForm({ teams, matches }: Props) {
     }
   }
 
+  // Admin elige quién AVANZÓ (penales en empate 90'). Guarda enseguida con ese ganador.
+  function setWinner(matchId: number, teamId: number) {
+    setWinners((prev) => new Map(prev).set(matchId, teamId));
+    const cur = scoresRef.current.get(matchId);
+    if (!cur || cur.home === '' || cur.away === '') return;
+    setStatuses((s) => new Map(s).set(matchId, 'saving'));
+    saveMatchResult({
+      matchId, homeScore: Number(cur.home), awayScore: Number(cur.away), winnerTeamId: teamId,
+    }).then((r) => {
+      setStatuses((s) => new Map(s).set(matchId, r.ok ? 'saved' : 'error'));
+      if (r.ok) {
+        router.refresh();
+        setTimeout(() => setStatuses((s) => {
+          const next = new Map(s);
+          if (next.get(matchId) === 'saved') next.delete(matchId);
+          return next;
+        }), 1500);
+      }
+    });
+  }
+
   function renderMatch(m: MatchRow) {
     const home = m.home_team_id ? teamById.get(m.home_team_id) : null;
     const away = m.away_team_id ? teamById.get(m.away_team_id) : null;
     const cur = scores.get(m.id) ?? { home: '', away: '' };
     const status = statuses.get(m.id);
     const pending = !home || !away;
+    const isKo = m.stage !== 'group';
+    const bothFilled = cur.home !== '' && cur.away !== '';
+    const isDraw = bothFilled && Number(cur.home) === Number(cur.away);
+    const decisiveWinner = bothFilled && !isDraw ? (Number(cur.home) > Number(cur.away) ? m.home_team_id : m.away_team_id) : null;
+    const effWinner = decisiveWinner ?? (winners.get(m.id) ?? null);
+    const wbtn = (sel: boolean) =>
+      `rounded border px-2 py-0.5 ${sel ? 'border-emerald-500 bg-emerald-100 font-bold text-emerald-800' : 'border-slate-200 text-slate-500'} ${isDraw ? 'cursor-pointer hover:border-emerald-400' : 'cursor-default'}`;
     return (
-      <div key={m.id} className="flex items-center gap-2 rounded border border-slate-200 bg-white px-3 py-2">
-        <span className="w-16 shrink-0 text-xs text-slate-500 font-mono">{m.external_code}</span>
-        <div className="flex-1 text-right text-sm font-medium truncate">
-          {home ? <>{home.flag_emoji ?? ''} {home.name}</> : <span className="text-slate-400 italic">por definir</span>}
+      <div key={m.id} className="rounded border border-slate-200 bg-white px-3 py-2">
+        <div className="flex items-center gap-2">
+          <span className="w-16 shrink-0 text-xs text-slate-500 font-mono">{m.external_code}</span>
+          <div className="flex-1 text-right text-sm font-medium truncate">
+            {home ? <>{home.flag_emoji ?? ''} {home.name}</> : <span className="text-slate-400 italic">por definir</span>}
+          </div>
+          <input
+            type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2}
+            value={cur.home}
+            onChange={(e) => update(m.id, 'home', e.target.value)}
+            disabled={pending}
+            className="w-12 rounded border border-slate-300 bg-amber-50 px-2 py-1.5 text-center font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-30"
+          />
+          <span className="text-slate-400">-</span>
+          <input
+            type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2}
+            value={cur.away}
+            onChange={(e) => update(m.id, 'away', e.target.value)}
+            disabled={pending}
+            className="w-12 rounded border border-slate-300 bg-amber-50 px-2 py-1.5 text-center font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-30"
+          />
+          <div className="flex-1 text-left text-sm font-medium truncate">
+            {away ? <>{away.flag_emoji ?? ''} {away.name}</> : <span className="text-slate-400 italic">por definir</span>}
+          </div>
+          <span className="shrink-0 w-20 text-right text-[10px] font-semibold">
+            {status === 'saving' && <span className="text-blue-700">guardando…</span>}
+            {status === 'saved'  && <span className="text-emerald-700">✓ ok</span>}
+            {status === 'error'  && <span className="text-red-700">error</span>}
+          </span>
         </div>
-        <input
-          type="text"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          maxLength={2}
-          value={cur.home}
-          onChange={(e) => update(m.id, 'home', e.target.value)}
-          disabled={pending}
-          className="w-12 rounded border border-slate-300 bg-amber-50 px-2 py-1.5 text-center font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-30"
-        />
-        <span className="text-slate-400">-</span>
-        <input
-          type="text"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          maxLength={2}
-          value={cur.away}
-          onChange={(e) => update(m.id, 'away', e.target.value)}
-          disabled={pending}
-          className="w-12 rounded border border-slate-300 bg-amber-50 px-2 py-1.5 text-center font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-30"
-        />
-        <div className="flex-1 text-left text-sm font-medium truncate">
-          {away ? <>{away.flag_emoji ?? ''} {away.name}</> : <span className="text-slate-400 italic">por definir</span>}
-        </div>
-        <span className="shrink-0 w-20 text-right text-[10px] font-semibold">
-          {status === 'saving' && <span className="text-blue-700">guardando…</span>}
-          {status === 'saved'  && <span className="text-emerald-700">✓ ok</span>}
-          {status === 'error'  && <span className="text-red-700">error</span>}
-        </span>
+        {isKo && !pending && bothFilled && (
+          <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5 text-xs">
+            <span className="text-slate-500">Pasó:</span>
+            <button type="button" disabled={!isDraw} className={wbtn(effWinner === m.home_team_id)}
+              onClick={() => isDraw && m.home_team_id && setWinner(m.id, m.home_team_id)}>
+              {home?.flag_emoji ?? ''} {home?.name}
+            </button>
+            <button type="button" disabled={!isDraw} className={wbtn(effWinner === m.away_team_id)}
+              onClick={() => isDraw && m.away_team_id && setWinner(m.id, m.away_team_id)}>
+              {away?.flag_emoji ?? ''} {away?.name}
+            </button>
+            {isDraw && !effWinner && <span className="font-semibold text-red-600">⚠️ empate 90′ — elige quién pasó (penales)</span>}
+            {isDraw && effWinner && <span className="text-slate-400">por penales</span>}
+          </div>
+        )}
       </div>
     );
   }
@@ -187,9 +236,8 @@ export function ResultsForm({ teams, matches }: Props) {
       {activeStage !== 'group' && (
         <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
           <strong>{STAGE_LABEL[activeStage]} — resultados oficiales.</strong>{' '}
-          Solo aparecen habilitados los partidos donde ya asignaste los 2 equipos en{' '}
-          <a href="/admin/eliminatorias" className="underline font-semibold">/admin/eliminatorias</a>.
-          Los demás aparecen como "por definir".
+          El marcador es el de los <strong>90 minutos</strong> (cuenta para los puntos de "marcador en vivo").
+          Si queda <strong>empate</strong>, elige abajo <strong>quién pasó por penales</strong>: eso define el avance del cuadro (no cambia el marcador).
         </div>
       )}
 

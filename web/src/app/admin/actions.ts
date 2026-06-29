@@ -39,6 +39,10 @@ const matchResultSchema = z.object({
   matchId: z.number().int().positive(),
   homeScore: z.number().int().min(0).max(20).nullable(),
   awayScore: z.number().int().min(0).max(20).nullable(),
+  // KO: quién AVANZÓ. En empate de 90' (penales) lo define el admin; con ganador
+  // claro en 90' se infiere del marcador (este campo se ignora). El marcador en sí
+  // (puntos de "marcador en vivo") siempre es el de los 90'.
+  winnerTeamId: z.number().int().positive().nullable().optional(),
 });
 
 /** Admin: guarda el resultado oficial de un partido (grupo o eliminatoria). */
@@ -49,15 +53,25 @@ export async function saveMatchResult(input: z.infer<typeof matchResultSchema>) 
   const parsed = matchResultSchema.parse(input);
   const supa = getSupabaseAdminClient();
 
-  // Si los dos scores son null, "limpia" el resultado
-  const update = parsed.homeScore == null || parsed.awayScore == null
-    ? { home_score: null, away_score: null, winner_team_id: null }
-    : {
-        home_score: parsed.homeScore,
-        away_score: parsed.awayScore,
-        // Para KO, registra ganador si no es empate (en empate no se permite en KO, pero
-        // dejamos el manejo al admin: si pone empate en KO, winner queda null)
-      };
+  // Necesitamos los equipos del partido para fijar el ganador del avance.
+  const { data: matchRow } = await supa
+    .from('matches').select('home_team_id, away_team_id').eq('id', parsed.matchId).maybeSingle();
+  const mh = (matchRow as { home_team_id: number | null } | null)?.home_team_id ?? null;
+  const ma = (matchRow as { away_team_id: number | null } | null)?.away_team_id ?? null;
+
+  let update: { home_score: number | null; away_score: number | null; winner_team_id: number | null };
+  if (parsed.homeScore == null || parsed.awayScore == null) {
+    update = { home_score: null, away_score: null, winner_team_id: null };
+  } else {
+    // Ganador del AVANCE (separado del marcador de 90'):
+    //  - marcador decisivo en 90' → lo define el marcador.
+    //  - empate en 90' → lo define el admin (penales); si no eligió, queda null (no avanza).
+    let winner: number | null;
+    if (parsed.homeScore > parsed.awayScore) winner = mh;
+    else if (parsed.awayScore > parsed.homeScore) winner = ma;
+    else winner = (parsed.winnerTeamId === mh || parsed.winnerTeamId === ma) ? parsed.winnerTeamId! : null;
+    update = { home_score: parsed.homeScore, away_score: parsed.awayScore, winner_team_id: winner };
+  }
 
   const { error } = await supa
     .from('matches')
@@ -138,10 +152,10 @@ async function fillOfficialBracket(
   supa: ReturnType<typeof getSupabaseAdminClient>,
   overwrite: boolean,
 ): Promise<{ r32: number; r16: number; qf: number; sf: number; tp: number; final: number } | { error: string }> {
-  type Row = { id: number; external_code: string; stage: string; group_letter: string | null; scheduled_at: string | null; home_team_id: number | null; away_team_id: number | null; home_score: number | null; away_score: number | null };
+  type Row = { id: number; external_code: string; stage: string; group_letter: string | null; scheduled_at: string | null; home_team_id: number | null; away_team_id: number | null; home_score: number | null; away_score: number | null; winner_team_id: number | null };
   const [{ data: teams }, { data: matches }] = await Promise.all([
     supa.from('teams').select('id, group_letter'),
-    supa.from('matches').select('id, external_code, stage, group_letter, scheduled_at, home_team_id, away_team_id, home_score, away_score'),
+    supa.from('matches').select('id, external_code, stage, group_letter, scheduled_at, home_team_id, away_team_id, home_score, away_score, winner_team_id'),
   ]);
 
   const teamsByGroup = new Map<string, number[]>();
@@ -193,15 +207,16 @@ async function fillOfficialBracket(
       (!m.scheduled_at || new Date(m.scheduled_at).getTime() <= nowMs);
     const winnerOf = (m?: Row): number | null => {
       if (!playedNow(m)) return null;
+      if (m!.winner_team_id) return m!.winner_team_id;  // autoritativo (incluye penales en empate 90')
       if (m!.home_score! > m!.away_score!) return m!.home_team_id;
       if (m!.away_score! > m!.home_score!) return m!.away_team_id;
-      return null;
+      return null;  // empate 90' sin ganador elegido → no avanza
     };
     const loserOf = (m?: Row): number | null => {
       if (!playedNow(m)) return null;
-      if (m!.home_score! < m!.away_score!) return m!.home_team_id;
-      if (m!.away_score! < m!.home_score!) return m!.away_team_id;
-      return null;
+      const w = winnerOf(m);
+      if (!w) return null;
+      return w === m!.home_team_id ? m!.away_team_id : m!.home_team_id;
     };
     const R16: Record<string, [string, string]> = { 'R16-01': ['R32-02', 'R32-05'], 'R16-02': ['R32-01', 'R32-03'], 'R16-03': ['R32-04', 'R32-06'], 'R16-04': ['R32-07', 'R32-08'], 'R16-05': ['R32-11', 'R32-12'], 'R16-06': ['R32-09', 'R32-10'], 'R16-07': ['R32-14', 'R32-16'], 'R16-08': ['R32-13', 'R32-15'] };
     const QF: Record<string, [string, string]> = { 'QF-01': ['R16-01', 'R16-02'], 'QF-02': ['R16-05', 'R16-06'], 'QF-03': ['R16-03', 'R16-04'], 'QF-04': ['R16-07', 'R16-08'] };
